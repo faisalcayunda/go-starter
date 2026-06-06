@@ -1,0 +1,11 @@
+# region:targets (db-mysql) — target migrasi DB via golang-migrate CLI.
+# Memerlukan tool `migrate` terpasang: https://github.com/golang-migrate/migrate
+# (CLI, BUKAN import Go — go build tidak menariknya). DSN dari env DATABASE_URL,
+# format golang-migrate MySQL: "mysql://user:pass@tcp(host:port)/dbname".
+.PHONY: migrate-up migrate-down
+
+migrate-up:
+	migrate -path migrations -database "$(DATABASE_URL)" up
+
+migrate-down:
+	migrate -path migrations -database "$(DATABASE_URL)" down 1

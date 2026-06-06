@@ -1,0 +1,55 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul http-echo: MENGGANTI router net/http (http.ServeMux) milik core dengan
+# labstack/echo/v4. Mekanisme penukaran = MODULE-LEVEL FILE GATING (sama seperti
+# http-chi): core menyediakan internal/httpserver/server.go HANYA bila
+# http=net/http; modul ini menyediakan VERSI echo file yang SAMA, aktif HANYA bila
+# http=echo. PERSIS SATU server.go ter-emit — tanpa file yatim.
+#
+# Kontrak yang DIJAGA agar composition root (internal/app) kompilasi tanpa ubah:
+#   - package httpserver
+#   - type Options struct { Addr string; ReadTimeout, WriteTimeout time.Duration }
+#   - func New(opts Options, logger *slog.Logger) *http.Server
+# *echo.Echo mengimplementasikan http.Handler (punya ServeHTTP), sehingga dapat
+# dipasang sebagai Handler pada *http.Server — tanda tangan New() tetap identik.
+# Handler contoh (internal/handler/example.go) TETAP milik core, bertanda-tangan
+# net/http; echo memasangnya via echo.WrapHandler — example_test.go core tetap hijau.
+name: http-echo
+description: >-
+  Router labstack/echo/v4 sebagai pengganti http.ServeMux core. Menyediakan
+  internal/httpserver/server.go versi echo (middleware RequestID/Logger/Recover,
+  contoh path param via c.Param) dengan tanda tangan New() identik core, aktif
+  hanya bila http=echo. Berlaku untuk monolith maupun modular-monolith.
+
+# files[] skema FileSpec kanonik. server.go di-render (Go → wajib gofmt-valid).
+# when meng-gate ke http=echo.
+files:
+  - template: httpserver/server.go.tmpl
+    target:   internal/httpserver/server.go
+    mode:     render
+    when:     "eq .HTTP \"echo\""
+
+# Dependency go.mod via gomod:. echo v4.15.2 = rilis stabil terbaru terverifikasi
+# (pkg.go.dev, 2026-05-01). Hanya dep ini yang di-import server.go versi echo →
+# go.mod project jujur. Middleware berada di subpaket
+# github.com/labstack/echo/v4/middleware (module yang sama).
+gomod:
+  - path:    github.com/labstack/echo/v4
+    version: v4.15.2
+
+requires:
+  - core
+
+# Framework HTTP saling eksklusif.
+conflicts:
+  - http-chi
+  - http-gin
+  - http-fiber
+
+# Tanpa kontribusi merge: echo MENGGANTI server.go core (module-level swap).
+# Anchor region:routes tetap dipertahankan di dalam server.go versi echo untuk
+# titik sisip `add service` inkremental yang netral & idempoten.
+contributes: []
+
+# Vars default echo; map[string]any.
+vars:
+  AppPort: 8080

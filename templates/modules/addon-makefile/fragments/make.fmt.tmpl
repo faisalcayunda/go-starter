@@ -1,0 +1,8 @@
+# region:targets (addon-makefile) — format & vet seluruh kode.
+.PHONY: fmt vet
+
+fmt:
+	gofmt -w .
+
+vet:
+	go vet ./...

@@ -1,0 +1,40 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul addon-ci: konfigurasi Continuous Integration. Provider dipilih via
+# Answers.CI ∈ {github-actions, gitlab-ci}; tiap file di-gate `when` berbasis nilai
+# CI sehingga TEPAT SATU file CI ter-emit (mutual eksklusif by gating, bukan
+# conflicts modul). Aktif bila CI != none (module-level gating di resolver).
+#
+# File standalone (TIDAK ada anchor/merge): YAML CI berdiri sendiri, tak menyumbang
+# ke file shared core. Tak ada dependency go.mod (GitHub Actions / GitLab CI =
+# layanan eksternal, bukan import Go). Job: lint (golangci-lint, hanya bila .Lint),
+# test (go test ./...), build (go build ./...).
+name: addon-ci
+description: >-
+  Pipeline CI (lint + test + build) untuk GitHub Actions (.github/workflows/ci.yml)
+  atau GitLab CI (.gitlab-ci.yml), dipilih lewat Answers.CI. Stage lint hanya hadir
+  bila add-on golangci-lint aktif. go-version dipin via var GoVersion.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# mode render: file memuat placeholder {{ .GoVersion }} & {{ if .Lint }} — perlu
+# dieksekusi template engine. YAML CI memakai sintaks "$VAR" (bukan "{{"), jadi
+# aman dirender tanpa tabrakan delimiter. `when` memilih provider tunggal.
+files:
+  - template: github/ci.yml.tmpl
+    target:   .github/workflows/ci.yml
+    mode:     render
+    when:     "eq .CI \"github-actions\""
+  - template: gitlab/gitlab-ci.yml.tmpl
+    target:   .gitlab-ci.yml
+    mode:     render
+    when:     "eq .CI \"gitlab-ci\""
+
+gomod: []
+
+requires: []
+conflicts: []
+contributes: []
+
+# Vars default: GoVersion dipin agar selaras directive go.mod project
+# (resolver goVersionDefault "1.24"). Bump aman (MINOR) saat baseline Go naik.
+vars:
+  GoVersion: "1.24"

@@ -1,0 +1,19 @@
+  # service "{{ .Service }}" (arch-microservice).
+  {{ toKebab .Service }}:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: {{ .Service }}
+    env_file:
+      - .env
+{{- if .IsFirst }}
+    # Service pertama mengekspos HTTP /call (bukti inter-service call).
+    ports:
+      - "{{ .GatewayPort }}:{{ .GatewayPort }}"
+    depends_on:
+{{- range .Others }}
+      - {{ toKebab . }}
+{{- end }}
+{{- end }}
+    restart: unless-stopped

@@ -1,0 +1,26 @@
+package observability
+
+import (
+	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+)
+
+// MetricsHandler mengembalikan http.Handler yang mengekspos metrik Prometheus
+// pada endpoint (lazimnya "/metrics"). Memakai registry default Prometheus —
+// metrik yang didaftarkan via prometheus.MustRegister akan tampil di sini.
+//
+//	mux.Handle("/metrics", observability.MetricsHandler())
+func MetricsHandler() http.Handler {
+	return promhttp.Handler()
+}
+
+// WrapHTTP membungkus handler dengan instrumentasi OpenTelemetry (otelhttp):
+// tiap request menghasilkan span tracing dengan operasi bernama. Pasang sebagai
+// handler terluar server agar seluruh rute ter-instrumentasi.
+//
+//	srv.Handler = observability.WrapHTTP(mux, "myservice")
+func WrapHTTP(next http.Handler, operation string) http.Handler {
+	return otelhttp.NewHandler(next, operation)
+}

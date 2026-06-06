@@ -1,0 +1,3 @@
+# gostarter — skeleton Fase 2
+
+Ini adalah **skeleton struktural** hasil Fase 2 (Desain Teknis Builder): hanya interface, tipe, dan signature stub — **belum ada logika**. Seluruh body fungsi adalah stub (`panic("TODO: implement (Fase 3)")` atau `return errNotImplemented`), dan `cmd/gostarter/main.go` hanya mencetak pesan stub. Pada tahap ini sengaja **tidak ada dependency eksternal** (hanya stdlib) sehingga `go build ./...` hijau offline; library `cobra`/`huh`/`modfile` ditambahkan saat implementasi di Fase 3. Detail keputusan ada di `docs/SPEC.md`, `docs/adr/ADR-001-builder-stack.md`, dan ADR-002/003 (arsitektur internal & sistem template). Module path builder: `github.com/faisalcayunda/gostarter`.

@@ -1,0 +1,5 @@
+# region:targets (addon-makefile) — build image Docker dari Dockerfile.
+.PHONY: docker-build
+
+docker-build:
+	docker build -t {{ modBase .ModulePath }}:latest .

@@ -1,0 +1,28 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul arch-monolith: skeleton spesifik arsitektur monolith (layout layered /
+# Kandidat B, riset 01-monolith §4.1). Tepat satu modul arch-* aktif (mutual
+# conflicts). Membutuhkan core (pemilik file shared & wiring main).
+name: arch-monolith
+description: >-
+  Skeleton arsitektur monolith layered (Kandidat B): internal/ package-by-feature.
+  Menyediakan kerangka layer service/handler tanpa logika (diisi Fase 3).
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+files:
+  - template: internal/app/app.go.tmpl
+    target:   internal/app/app.go
+    mode:     render
+
+gomod: []
+
+requires:
+  - core
+
+# Tepat satu arsitektur aktif: konflik mutual dengan arch-* lain.
+conflicts:
+  - arch-modular
+  - arch-microservice
+
+contributes: []
+
+vars: {}

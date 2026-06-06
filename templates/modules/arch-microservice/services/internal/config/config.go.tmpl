@@ -1,0 +1,53 @@
+// Package config memuat konfigurasi runtime service "{{ .Service }}" dari
+// environment. Memakai libs/config bersama (stdlib) agar konsisten lintas service.
+package config
+
+import (
+	"time"
+
+	"{{ modJoin .ModulePath "libs/config" }}"
+)
+
+{{- if .IsFirst }}
+
+// Downstream mendeskripsikan satu service tujuan yang dapat dipanggil endpoint
+// /call milik service ini (bukti inter-service call via gRPC).
+type Downstream struct {
+	// Name adalah nama logis service tujuan (cocok dengan ?to=<name>).
+	Name string
+	// Addr adalah alamat gRPC host:port service tujuan (mis. "{{ (index .Downstreams 0).Name }}:{{ (index .Downstreams 0).Port }}").
+	Addr string
+}
+{{- end }}
+
+// Config memuat pengaturan runtime service "{{ .Service }}".
+type Config struct {
+	// GRPCAddr adalah alamat bind gRPC server (mis. ":{{ .GrpcPort }}").
+	GRPCAddr string
+{{- if .IsFirst }}
+	// HTTPAddr adalah alamat bind HTTP server kecil (endpoint /call) — service
+	// pertama mengekspos bukti inter-service call.
+	HTTPAddr string
+	// Downstreams adalah daftar service gRPC yang dapat dipanggil lewat /call?to=.
+	Downstreams []Downstream
+{{- end }}
+	// ShutdownTimeout adalah tenggang graceful shutdown.
+	ShutdownTimeout time.Duration
+}
+
+// Load membaca konfigurasi dari environment dengan default yang wajar. Tidak
+// pernah gagal: nilai absen jatuh ke default sehingga service selalu bisa start.
+func Load() Config {
+	return Config{
+		GRPCAddr: config.Get("GRPC_ADDR", ":{{ .GrpcPort }}"),
+{{- if .IsFirst }}
+		HTTPAddr: config.Get("HTTP_ADDR", ":{{ .GatewayPort }}"),
+		Downstreams: []Downstream{
+{{- range .Downstreams }}
+			{Name: "{{ .Name }}", Addr: config.Get("{{ toScreamingSnake .Name }}_GRPC_ADDR", "{{ .Name }}:{{ .Port }}")},
+{{- end }}
+		},
+{{- end }}
+		ShutdownTimeout: config.GetDuration("SHUTDOWN_TIMEOUT", 10*time.Second),
+	}
+}

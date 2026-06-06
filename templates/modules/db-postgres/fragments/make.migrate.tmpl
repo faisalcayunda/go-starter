@@ -1,0 +1,10 @@
+# region:targets (db-postgres) — target migrasi DB via golang-migrate CLI.
+# Memerlukan tool `migrate` terpasang: https://github.com/golang-migrate/migrate
+# (CLI, BUKAN import Go — go build tidak menariknya). DSN dari env DATABASE_URL.
+.PHONY: migrate-up migrate-down
+
+migrate-up:
+	migrate -path migrations -database "$(DATABASE_URL)" up
+
+migrate-down:
+	migrate -path migrations -database "$(DATABASE_URL)" down 1

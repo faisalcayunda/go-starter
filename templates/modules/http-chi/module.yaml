@@ -1,0 +1,63 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul http-chi: MENGGANTI router net/http (http.ServeMux) milik core dengan
+# go-chi/chi/v5. Mekanisme penukaran = MODULE-LEVEL FILE GATING (bukan fragment):
+# core menyediakan internal/httpserver/server.go HANYA bila http=net/http
+# (files[].when: eq .HTTP "net/http"); modul ini menyediakan VERSI chi dari
+# file yang SAMA, aktif HANYA bila http=chi. Dengan begitu PERSIS SATU server.go
+# ter-emit — tak ada file yatim (pelajaran Fase 3: http-* dorman yang panic/yatim
+# dihapus; kini implementasi nyata via gating).
+#
+# Kontrak yang DIJAGA agar composition root (internal/app, arch-monolith &
+# arch-modular) kompilasi tanpa perubahan:
+#   - package httpserver
+#   - type Options struct { Addr string; ReadTimeout, WriteTimeout time.Duration }
+#   - func New(opts Options, logger *slog.Logger) *http.Server
+# Handler contoh (internal/handler/example.go) TETAP milik core dan bertanda-tangan
+# net/http (http.HandlerFunc) — chi memasang http.HandlerFunc apa adanya, sehingga
+# example_test.go (milik core) tetap hijau lintas framework.
+name: http-chi
+description: >-
+  Router go-chi/chi/v5 sebagai pengganti http.ServeMux core. Menyediakan
+  internal/httpserver/server.go versi chi (middleware RequestID/Logger/Recoverer,
+  contoh path param via chi.URLParam) dengan tanda tangan New() identik core,
+  aktif hanya bila http=chi. Berlaku untuk monolith maupun modular-monolith.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}. server.go di-render
+# (Go → wajib gofmt-valid pasca render). when meng-gate ke http=chi: hanya saat itu
+# file ini ikut ter-emit (di luar itu core net/http yang aktif).
+files:
+  - template: httpserver/server.go.tmpl
+    target:   internal/httpserver/server.go
+    mode:     render
+    when:     "eq .HTTP \"chi\""
+
+# Dependency go.mod via gomod: (dirakit modfile.Format, ADR-002 §6). chi v5.3.0 =
+# rilis stabil terbaru terverifikasi (pkg.go.dev, 2026-05-22). Hanya dep ini yang
+# BENAR-BENAR di-import server.go versi chi → go.mod project jujur (tak di-prune
+# go mod tidy). middleware ada di subpaket github.com/go-chi/chi/v5/middleware
+# (module yang sama, tak menambah entry require terpisah).
+gomod:
+  - path:    github.com/go-chi/chi/v5
+    version: v5.3.0
+
+# core menyediakan skeleton bersama (config, handler, main, app via arch-*).
+requires:
+  - core
+
+# Framework HTTP saling eksklusif: persis satu router aktif. net/http adalah core
+# (default, tanpa modul) sehingga tak perlu dideklarasikan di sini; cukup konflik
+# antar-modul http opsional. Resolver TAMBAHAN meng-gate aktivasi per .HTTP.
+conflicts:
+  - http-echo
+  - http-gin
+  - http-fiber
+
+# Tidak ada kontribusi merge: router chi MENGGANTI server.go core sepenuhnya
+# (module-level swap), bukan menyumbang fragmen ke anchor. Anchor region:routes
+# tetap dipertahankan DI DALAM server.go versi chi agar `add service` inkremental
+# (Fase 4b) tetap punya titik sisip yang netral & idempoten.
+contributes: []
+
+# Vars default chi; map[string]any.
+vars:
+  AppPort: 8080

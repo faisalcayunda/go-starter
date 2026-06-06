@@ -1,0 +1,16 @@
+package observability
+
+import (
+	"net/http"
+)
+
+// Health adalah handler health check sederhana: selalu 200 OK dengan body JSON
+// {"status":"ok"}. Cocok untuk liveness probe. Untuk readiness yang memeriksa
+// dependency (DB, broker), bungkus dengan pengecekan tambahan sesuai kebutuhan.
+//
+//	mux.HandleFunc("/healthz", observability.Health)
+func Health(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"ok"}`))
+}

@@ -1,0 +1,5 @@
+# region:targets (addon-makefile) — jalankan aplikasi dari source.
+.PHONY: run
+
+run:
+	go run ./cmd/{{ modBase .ModulePath }}

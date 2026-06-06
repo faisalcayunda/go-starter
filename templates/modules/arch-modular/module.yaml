@@ -1,0 +1,157 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+#
+# Modul arch-modular: skeleton arsitektur MODULAR MONOLITH (Kandidat C, riset
+# 01-monolith §2/§4.2). Tepat satu modul arch-* aktif (mutual conflicts).
+#
+# ── KEPUTUSAN OWNERSHIP (penting — baca sebelum mengubah) ────────────────────
+# Modul `core` memiliki file shared LINTAS-ARSITEKTUR yang netral: config loader
+# (internal/config/config.go), .gitignore, .env.example, Makefile, dan
+# docker-compose.yml. arch-modular MEMAKAI ULANG file-file netral itu lewat
+# `requires: core` (TIDAK menduplikasinya).
+#
+# Namun beberapa file `core` bersifat SPESIFIK monolith-layered (Kandidat B) dan
+# TIDAK cocok untuk modular monolith:
+#   - cmd/{{ modBase .ModulePath }}/main.go  → core mendelegasikan ke internal/app.Run
+#                                              (composition root layered).
+#   - internal/httpserver/server.go + health.go → server monolith yang meng-hardcode
+#                                              handler.Hello.
+#   - internal/handler/example.go (+ _test)  → handler contoh monolith.
+#   - README.md                              → mendeskripsikan layout monolith.
+# arch-monolith juga menyumbang internal/app/app.go (composition root layered).
+#
+# Agar TIDAK ada DOUBLE-OWNERSHIP pada target yang sama (mis. dua modul aktif
+# sama-sama menghasilkan cmd/<app>/main.go → konflik FileOp), kontrak resolver
+# Fase 4a adalah: file core yang spesifik-monolith di atas DIGATE
+# `when: 'eq .Arch "monolith"'` di module.yaml core, sehingga saat
+# arch=modular-monolith file-file itu TIDAK diproduksi core, dan arch-modular
+# menyediakan versinya sendiri (main.go composition root tunggal, httpserver
+# netral-domain, README modular). config/config.go core TETAP aktif (arch-netral).
+#
+# Konsekuensi: arch-modular OWNS cmd/<app>/main.go, internal/httpserver/*, README.md,
+# kedua domain (catalog, orders), dan shared/contract. Ia conflicts dengan
+# arch-monolith & arch-microservice (tepat satu arsitektur aktif).
+name: arch-modular
+description: >-
+  Skeleton arsitektur modular monolith (Kandidat C): tiap domain di internal/<domain>
+  (boundary berduri dipaksa compiler), komunikasi antar-domain via internal/shared/contract
+  (interface, in-process), composition root tunggal di cmd. Dua domain contoh: catalog & orders.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# Semua .go dirender (gofmt wajib, ADR-003 D3). main.go memiliki anchor
+# region:wiring; httpserver/server.go memiliki anchor region:routes — keduanya
+# disumbang modul lain (db-*, addon-*) lewat ModeMerge bila aktif. Pada profil
+# db=none tanpa add-on, anchor tetap berupa marker netral (idempotensi merge).
+files:
+  # Composition root tunggal (OWNS target cmd/<app>/main.go untuk arch modular).
+  - template: cmd/main.go.tmpl
+    target:   cmd/{{ modBase .ModulePath }}/main.go
+    mode:     render
+
+  # HTTP server netral-domain (net/http) — OWNS internal/httpserver/server.go untuk
+  # modular HANYA bila http=net/http. Bila http=chi/echo, modul http-* menyediakan
+  # versi server.go-nya sendiri (varian modular: menerima modules ...Module &
+  # mem-mount mux domain). Gate ini mencegah DOUBLE-OWNERSHIP server.go
+  # (arch-modular ∥ http-chi/http-echo) → silent-overwrite (pelajaran Fase 3).
+  # health.go TIDAK digate: Healthz selalu dibutuhkan paket httpserver lintas
+  # framework (server net/http maupun chi/echo varian modular merujuknya).
+  # STATIK MURNI (tanpa {{ }}) → mode: copy (MAJ-4). Catatan: bila .Obs aktif,
+  # resolver MENGUBAH FileOp ini menjadi ModeMerge (obs menyumbang region:imports +
+  # region:routes) → di-render via template engine & di-gofmt; mode di sini hanya
+  # menentukan permission. Saat .Obs off, file disalin byte-mentah (sudah gofmt-clean).
+  - template: internal/httpserver/server.go.tmpl
+    target:   internal/httpserver/server.go
+    mode:     copy
+    when:     "eq .HTTP \"net/http\""
+  # STATIK MURNI (tanpa {{ }}) → mode: copy (MAJ-4); sumber sudah gofmt-clean.
+  - template: internal/httpserver/health.go.tmpl
+    target:   internal/httpserver/health.go
+    mode:     copy
+
+  # Kontrak antar-domain (port) — paket netral yang boleh dipakai semua domain.
+  # STATIK MURNI (tanpa {{ }}) → mode: copy (MAJ-4). Disalin byte-mentah; sumber
+  # sudah gofmt-clean (copy tidak melewatkan go/format).
+  - template: internal/shared/contract/contract.go.tmpl
+    target:   internal/shared/contract/contract.go
+    mode:     copy
+
+  # Domain catalog (penyedia; mengimplementasikan contract.Catalog).
+  # Layout berduri: facade publik di internal/modules/catalog/catalog.go; detail
+  # implementasi terkurung di internal/modules/catalog/internal/core/** yang —
+  # menurut semantik direktori internal/ Go — TAK BISA di-import domain lain.
+  - template: internal/modules/catalog/catalog.go.tmpl
+    target:   internal/modules/catalog/catalog.go
+    mode:     render
+  # STATIK MURNI (model/repository/handler/handler_test catalog) → mode: copy
+  # (MAJ-4); service.go DINAMIS ({{ }}) → tetap render.
+  - template: internal/modules/catalog/internal/core/model.go.tmpl
+    target:   internal/modules/catalog/internal/core/model.go
+    mode:     copy
+  - template: internal/modules/catalog/internal/core/repository.go.tmpl
+    target:   internal/modules/catalog/internal/core/repository.go
+    mode:     copy
+  - template: internal/modules/catalog/internal/core/service.go.tmpl
+    target:   internal/modules/catalog/internal/core/service.go
+    mode:     render
+  - template: internal/modules/catalog/internal/core/handler.go.tmpl
+    target:   internal/modules/catalog/internal/core/handler.go
+    mode:     copy
+  - template: internal/modules/catalog/internal/core/handler_test.go.tmpl
+    target:   internal/modules/catalog/internal/core/handler_test.go
+    mode:     copy
+
+  # Domain orders (pemakai; memanggil catalog lewat contract.Catalog — tidak
+  # pernah meng-import paket catalog). Layout berduri sama seperti catalog.
+  - template: internal/modules/orders/orders.go.tmpl
+    target:   internal/modules/orders/orders.go
+    mode:     render
+  # STATIK MURNI (model/repository/id/handler orders) → mode: copy (MAJ-4);
+  # service.go & handler_test.go DINAMIS ({{ }}) → tetap render.
+  - template: internal/modules/orders/internal/core/model.go.tmpl
+    target:   internal/modules/orders/internal/core/model.go
+    mode:     copy
+  - template: internal/modules/orders/internal/core/repository.go.tmpl
+    target:   internal/modules/orders/internal/core/repository.go
+    mode:     copy
+  - template: internal/modules/orders/internal/core/id.go.tmpl
+    target:   internal/modules/orders/internal/core/id.go
+    mode:     copy
+  - template: internal/modules/orders/internal/core/service.go.tmpl
+    target:   internal/modules/orders/internal/core/service.go
+    mode:     render
+  - template: internal/modules/orders/internal/core/handler.go.tmpl
+    target:   internal/modules/orders/internal/core/handler.go
+    mode:     copy
+  - template: internal/modules/orders/internal/core/handler_test.go.tmpl
+    target:   internal/modules/orders/internal/core/handler_test.go
+    mode:     render
+
+  # README modular (OWNS README.md untuk arch modular; core README digate monolith).
+  - template: README.md.tmpl
+    target:   README.md
+    mode:     render
+
+# Dependency go.mod dialirkan via gomod: (modfile.Format, ADR-002 §6).
+# Profil db=none = MURNI STDLIB → zero require eksternal. db-* menambah dep-nya
+# sendiri saat aktif; arch-modular tidak membawa dependency apa pun.
+gomod: []
+
+# core menyediakan file shared netral (config/.gitignore/.env.example/Makefile/
+# docker-compose) + anchor region:wiring (di main core, digate monolith) — untuk
+# modular, anchor region:wiring dimiliki main.go arch-modular ini sendiri.
+requires:
+  - core
+
+# Tepat satu arsitektur aktif: konflik mutual dengan arch-* lain. Mencegah
+# double-ownership cmd/<app>/main.go & internal/httpserver/* (arch-monolith juga
+# memilikinya lewat core+app).
+conflicts:
+  - arch-monolith
+  - arch-microservice
+
+# arch-modular tidak menyumbang fragment ke file shared core (ia memproduksi
+# main.go & httpserver-nya sendiri yang BER-ANCHOR, sehingga db-*/addon-* yang
+# menyumbang ke region:wiring / region:routes menyisip ke skeleton modular ini).
+contributes: []
+
+# Vars default modul (selaras core: AppPort dipakai README & config).
+vars: {}

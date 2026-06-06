@@ -1,0 +1,49 @@
+package core
+
+import (
+	"context"
+	"errors"
+
+	"github.com/example/demo-modular/internal/shared/contract"
+)
+
+// Service memuat logika bisnis domain catalog. Ia juga MENGIMPLEMENTASIKAN
+// contract.Catalog — port yang dilihat domain lain — sehingga satu tipe melayani
+// dua peran: API internal domain (kaya) dan kontrak lintas-domain (minimal).
+type Service struct {
+	repo Repository
+}
+
+// NewService merakit Service dengan Repository-nya (dependency injection).
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
+}
+
+// Get mengembalikan produk internal lengkap untuk dipakai di dalam domain catalog
+// sendiri (mis. handler HTTP catalog).
+func (s *Service) Get(ctx context.Context, id string) (Product, error) {
+	return s.repo.FindByID(ctx, id)
+}
+
+// Pemeriksaan statis: *Service wajib memenuhi contract.Catalog. Gagal compile
+// bila signature menyimpang.
+var _ contract.Catalog = (*Service)(nil)
+
+// Lookup mengimplementasikan contract.Catalog. Ia memproyeksikan Product internal
+// menjadi contract.Product (subset field) — domain lain hanya menerima data yang
+// sengaja dibagikan (mis. SKU disembunyikan). Error internal diterjemahkan ke
+// contract.ErrNotFound agar pemakai tak perlu mengenal error internal catalog.
+func (s *Service) Lookup(ctx context.Context, id string) (contract.Product, error) {
+	p, err := s.repo.FindByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return contract.Product{}, contract.ErrNotFound
+		}
+		return contract.Product{}, err
+	}
+	return contract.Product{
+		ID:         p.ID,
+		Name:       p.Name,
+		PriceCents: p.PriceCents,
+	}, nil
+}

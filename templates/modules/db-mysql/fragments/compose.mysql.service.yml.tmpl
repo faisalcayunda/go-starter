@@ -1,0 +1,12 @@
+  # region:services (db-mysql) — service MySQL.
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: {{ .DBName }}
+      MYSQL_USER: {{ .DBUser }}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-mysql}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-root}
+    ports:
+      - "{{ .DBPort }}:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql

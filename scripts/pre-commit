@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+#
+# scripts/pre-commit — git pre-commit hook untuk repo BUILDER (gostarter),
+# tanpa dependency framework eksternal (alternatif .pre-commit-config.yaml).
+#
+# PASANG (pilih salah satu):
+#   make install-hooks
+#   # atau manual:
+#   ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+#
+# Hook membatalkan commit bila salah satu gerbang gagal:
+#   1. gofmt   — tidak boleh ada file Go belum di-format
+#   2. go vet  — analisis statik
+#   3. golangci-lint — gerbang lint utama (config .golangci.yml)
+#   4. go test ./... — unit test cepat (TANPA e2e; e2e dijalankan di CI)
+#
+# Lewati sementara (tidak disarankan): git commit --no-verify
+set -euo pipefail
+
+# Pindah ke root repo agar path relatif konsisten.
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+fail() {
+  echo "pre-commit GAGAL: $1" >&2
+  echo "  (lewati sementara dengan: git commit --no-verify — tidak disarankan)" >&2
+  exit 1
+}
+
+# Hanya jalan bila ada file .go ter-stage (hindari overhead pada commit non-Go).
+if ! git diff --cached --name-only --diff-filter=ACM | grep -q '\.go$'; then
+  exit 0
+fi
+
+# 1. gofmt — daftar file yang belum terformat di cmd/ dan internal/.
+#    M-2: KECUALIKAN internal/golden/testdata/** — itu pohon hasil RENDER (snapshot
+#    golden byte-identical), bukan kode builder. Sebagian adalah file Go generated/
+#    di-render yang SENGAJA tidak di-gofmt (byte-identical wajib dijaga apa adanya);
+#    mem-format-nya akan merusak invarian snapshot. Filter via grep -v.
+echo ">>> gofmt"
+unformatted="$(gofmt -l cmd internal | grep -v '^internal/golden/testdata/' || true)"
+if [ -n "$unformatted" ]; then
+  echo "File belum di-gofmt:" >&2
+  echo "$unformatted" >&2
+  fail "jalankan 'make fmt' lalu add ulang"
+fi
+
+# 2. go vet
+echo ">>> go vet"
+go vet ./... || fail "go vet menemukan masalah"
+
+# 3. golangci-lint (lewati dengan peringatan bila tool tidak terpasang).
+echo ">>> golangci-lint"
+if command -v golangci-lint >/dev/null 2>&1; then
+  golangci-lint run || fail "golangci-lint menemukan masalah (perbaiki lalu commit ulang)"
+else
+  echo "  golangci-lint tidak ditemukan di PATH — lewati (pasang via asdf/brew untuk gerbang penuh)" >&2
+fi
+
+# 4. go test cepat — unit test, tanpa e2e.
+echo ">>> go test ./..."
+go test ./... || fail "unit test gagal"
+
+echo "pre-commit OK"

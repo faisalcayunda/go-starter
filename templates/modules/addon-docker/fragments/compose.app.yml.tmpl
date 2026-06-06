@@ -1,0 +1,14 @@
+  # region:services (addon-docker) — service aplikasi (build dari Dockerfile).
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "{{ .AppPort }}:{{ .AppPort }}"
+    env_file:
+      - .env
+{{- if eq .DB "postgres" }}
+    depends_on:
+      - postgres
+{{- end }}
+    restart: unless-stopped

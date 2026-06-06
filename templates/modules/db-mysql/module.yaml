@@ -1,0 +1,97 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul db-mysql: driver MySQL (go-sql-driver/mysql via database/sql stdlib) +
+# skeleton DB + migrasi awal + kontribusi service compose, env, dan target migrate
+# Makefile. Dep go.mod dialirkan via gomod: (modfile.Format). Modul ini aktif HANYA
+# bila db=mysql (module-level gating di resolver) → menambah dep eksternal (build
+# butuh jaringan). golang-migrate dipakai via Makefile target (komentar/run), TIDAK
+# di-import di kode agar go build tak butuh runtime migrate.
+#
+# Pola IDENTIK dengan db-postgres (Fase 3, sudah hijau): tiru strukturnya. Beda
+# substantif hanya: driver via database/sql (bukan pgxpool), DSN format MySQL,
+# port 3306, service image mysql:8.4. Lisensi driver MPL-2.0 (SPEC §6 C20 — dicatat).
+name: db-mysql
+description: >-
+  MySQL (go-sql-driver/mysql via database/sql): skeleton koneksi DB dari env DSN +
+  migrasi awal, plus kontribusi service & volume ke docker-compose.yml, blok env ke
+  .env.example, dan target migrate ke Makefile.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# Migrasi .sql disalin apa adanya (mode copy) — bukan Go, tak perlu render/gofmt.
+files:
+  - template: database/mysql.go.tmpl
+    target:   internal/platform/database/mysql.go
+    mode:     render
+  - template: migrations/0001_init.up.sql.tmpl
+    target:   migrations/0001_init.up.sql
+    mode:     copy
+  - template: migrations/0001_init.down.sql.tmpl
+    target:   migrations/0001_init.down.sql
+    mode:     copy
+
+# Dependency go.mod dialirkan via gomod: (dirakit modfile.Format, ADR-002 §6).
+# HANYA driver go-sql-driver/mysql — satu-satunya dep yang BENAR-BENAR di-import
+# skeleton (database/mysql.go via blank import). database/sql dari stdlib (tak di
+# gomod). golang-migrate TIDAK di gomod: — tool CLI dipakai via Makefile, bukan
+# import (cermin pelajaran db-postgres Fase 3 agar go mod tidy tidak mem-prune).
+gomod:
+  - path:    github.com/go-sql-driver/mysql
+    version: v1.10.0
+
+# core menyediakan anchor "services"/"volumes" di compose + "database" di
+# .env.example + "targets" di Makefile. db-mysql menyisip ke sana.
+requires:
+  - core
+
+# Driver DB lain (mutual exclusive).
+conflicts:
+  - db-postgres
+  - db-sqlite
+  - db-mongo
+
+# Kontribusi merge: service & volume ke compose (hanya bila Docker aktif, C14),
+# blok env ke .env.example, target migrate ke Makefile (hanya bila Makefile aktif
+# DAN tool migrasi terpilih). `when` gaya text/template kanonik (ADR-002 §5).
+# Anchor selaras ADR-002/ADR-003: compose → services/volumes; env → database;
+# Makefile → targets. Order 20 = SAMA seperti db-postgres (driver tunggal aktif,
+# tak pernah bentrok karena mutual conflict).
+#
+# AUTO-WIRE (anchor region:imports): blok import main kini ber-anchor region:imports,
+# sehingga fragment merge BISA menambah import paket database — menghapus keterbatasan
+# Fase 3. db-mysql menyumbang import paket database + wiring database.Connect(ctx) ke
+# main saat db=mysql; *sql.DB dibuka & defer db.Close(). Ter-wire otomatis (bukan
+# library-only). go build hijau (Connect konek/ping hanya di RUNTIME).
+contributes:
+  - target:   docker-compose.yml
+    anchor:   services
+    fragment: fragments/compose.mysql.service.yml.tmpl
+    order:    20
+    when:     ".Docker"
+  - target:   docker-compose.yml
+    anchor:   volumes
+    fragment: fragments/compose.mysql.volume.yml.tmpl
+    order:    20
+    when:     ".Docker"
+  - target:   .env.example
+    anchor:   database
+    fragment: fragments/env.mysql.tmpl
+    order:    20
+    when:     ".EnvExample"
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   imports
+    fragment: fragments/main.imports.mysql.tmpl
+    order:    20
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   wiring
+    fragment: fragments/main.wiring.mysql.tmpl
+    order:    20
+  - target:   Makefile
+    anchor:   targets
+    fragment: fragments/make.migrate.tmpl
+    order:    20
+    when:     "and .Makefile (ne .Migrate \"\")"
+
+# Vars default; map[string]any → nilai non-string muat (DBPort: 3306).
+vars:
+  DBPort: 3306
+  DBName: app
+  DBUser: app

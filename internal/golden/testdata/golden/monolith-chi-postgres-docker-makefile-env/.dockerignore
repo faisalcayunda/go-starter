@@ -1,0 +1,12 @@
+# .dockerignore — kecilkan build context & hindari membocorkan artefak lokal.
+.git
+.gitignore
+*.md
+.env
+.env.*
+!.env.example
+bin/
+dist/
+tmp/
+*.log
+.DS_Store

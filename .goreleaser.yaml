@@ -1,0 +1,84 @@
+# GoReleaser config (schema v2) untuk gostarter.
+# Validasi:  goreleaser check
+# Snapshot:  goreleaser build --snapshot --clean --single-target
+# Rilis:     goreleaser release --clean   (dijalankan MANUAL oleh maintainer, lihat docs/release.md)
+#
+# Versi binary di-inject ke variabel package-level:
+#   github.com/faisalcayunda/gostarter/internal/cli.version
+# sehingga `gostarter --version` dan `gostarter version` menampilkan tag rilis.
+version: 2
+
+project_name: gostarter
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: gostarter
+    main: ./cmd/gostarter
+    binary: gostarter
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/faisalcayunda/gostarter/internal/cli.version={{.Version}}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: gostarter
+    ids:
+      - gostarter
+    # tar.gz untuk linux/darwin, zip untuk windows.
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  use: git
+  sort: asc
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "merge conflict"
+      - Merge pull request
+      - Merge remote-tracking branch
+      - Merge branch
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
+
+release:
+  # draft=true: rilis dibuat sebagai draft GitHub — aman, maintainer publish manual.
+  draft: true
+  prerelease: auto
+  name_template: "{{ .ProjectName }} {{ .Tag }}"

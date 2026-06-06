@@ -1,0 +1,56 @@
+// Package database menyediakan koneksi PostgreSQL via pgxpool (jackc/pgx/v5).
+// DSN dibangun dari environment (DATABASE_URL atau komponen DB_*). Pool dipakai
+// lapisan akses query.
+package database
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Connect membuka pool koneksi PostgreSQL dan memverifikasinya dengan Ping.
+// DSN diambil dari env DATABASE_URL bila ada; selain itu dirakit dari DB_HOST,
+// DB_PORT, DB_USER, DB_PASSWORD, DB_NAME. Pemanggil bertanggung jawab memanggil
+// pool.Close() saat shutdown.
+func Connect(ctx context.Context) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, dsn())
+	if err != nil {
+		return nil, fmt.Errorf("postgres: create pool: %w", err)
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("postgres: ping: %w", err)
+	}
+	return pool, nil
+}
+
+// dsn mengembalikan connection string PostgreSQL. DATABASE_URL diutamakan; bila
+// kosong, DSN dirakit dari komponen DB_* (default sesuai .env.example).
+func dsn() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
+	}
+	return fmt.Sprintf(
+		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
+		envOr("DB_USER", "app"),
+		envOr("DB_PASSWORD", "postgres"),
+		envOr("DB_HOST", "localhost"),
+		envOr("DB_PORT", "5432"),
+		envOr("DB_NAME", "app"),
+	)
+}
+
+// envOr mengembalikan nilai env key bila ada & non-kosong, selain itu fallback.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

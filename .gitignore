@@ -1,0 +1,27 @@
+# Binaries & build output
+/bin/
+/dist/
+/gostarter
+*.exe
+*.out
+
+# Test & coverage
+*.test
+coverage.out
+coverage.txt
+*.cover
+
+# Go workspace / vendor
+/vendor/
+go.work
+go.work.sum
+
+# Editor & OS
+.idea/
+.vscode/
+.DS_Store
+
+# Local env
+.env
+.env.local
+plan.md

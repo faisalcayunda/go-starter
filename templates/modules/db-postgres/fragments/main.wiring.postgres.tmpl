@@ -1,0 +1,7 @@
+	// region:wiring (db-postgres) — buka pool koneksi PostgreSQL dari env DSN.
+	pool, err := database.Connect(ctx)
+	if err != nil {
+		logger.Error("connect postgres", "error", err)
+		os.Exit(1)
+	}
+	defer pool.Close()

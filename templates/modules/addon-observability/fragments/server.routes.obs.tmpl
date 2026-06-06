@@ -1,0 +1,10 @@
+{{- if eq .HTTP "chi" -}}
+	// region:routes (addon-observability) — endpoint /metrics Prometheus (chi).
+	r.Handle("/metrics", obs.MetricsHandler())
+{{- else if eq .HTTP "echo" -}}
+	// region:routes (addon-observability) — endpoint /metrics Prometheus (echo).
+	e.GET("/metrics", echo.WrapHandler(obs.MetricsHandler()))
+{{- else -}}
+	// region:routes (addon-observability) — endpoint /metrics Prometheus (net/http).
+	mux.Handle("GET /metrics", obs.MetricsHandler())
+{{- end }}

@@ -1,0 +1,97 @@
+# .golangci.yml — konfigurasi golangci-lint v2 untuk repo BUILDER (gostarter).
+#
+# Ini config untuk kode Go builder itu sendiri (cmd/, internal/), BUKAN config
+# yang dihasilkan ke project hasil generate. Config template hasil generate ada
+# di templates/modules/addon-golangci/golangci.yml.tmpl dan tidak terpengaruh
+# file ini.
+#
+# Filosofi: cukup ketat menjaga kualitas (govet, staticcheck, errcheck, unused,
+# ineffassign, revive ringan, misspell), tapi tidak agresif sampai memblokir
+# pola wajar. Bump versi tool aman.
+version: "2"
+
+run:
+  timeout: 5m
+  # Sertakan file _test.go dalam analisis (kualitas test juga dijaga).
+  tests: true
+
+linters:
+  # default "standard" = errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  enable:
+    - misspell
+    - revive
+    - unconvert
+  settings:
+    misspell:
+      locale: US
+      # Komentar kode WAJIB Bahasa Indonesia (konvensi repo). misspell hanya tahu
+      # ejaan Inggris, sehingga kata Indonesia yang kebetulan mirip kata Inggris
+      # ter-flag sebagai typo (mis. "implementasi" → "implements", "variabel" →
+      # "variable"). Token Indonesia yang sah berikut dikecualikan secara presisi —
+      # ini BUKAN melemahkan linter: typo Inggris asli tetap tertangkap.
+      ignore-rules:
+        - implementasi
+        - variabel
+    staticcheck:
+      checks:
+        - all
+    revive:
+      # revive ringan: hanya rule idiomatik dasar, tidak memaksa gaya berlebihan.
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+        - name: var-naming
+  exclusions:
+    # File ber-header generated (mis. protoc-gen-go di gen/) dilewati.
+    generated: lax
+    # Preset bawaan golangci-lint untuk false-positive umum (std, comments, dll).
+    presets:
+      - common-false-positives
+      - std-error-handling
+    rules:
+      # Data golden testdata: tree hasil render, bukan kode builder — lewati.
+      - path: internal/golden/testdata/
+        linters:
+          - revive
+          - staticcheck
+          - misspell
+          - errcheck
+      # Kode generated (gen/) jika sempat ter-vendor saat e2e — lewati total.
+      - path: gen/
+        linters:
+          - revive
+          - staticcheck
+          - errcheck
+    paths:
+      # Jangan lint artefak build lokal. M-4: pola boilerplate generik golangci
+      # (third_party$/builtin$/examples$) DIHAPUS — repo generator ini tak punya &
+      # takkan punya direktori tersebut, jadi tak relevan. Yang dipertahankan hanya
+      # artefak build yang nyata ada/dipakai di sini (bin/ berisi binary, dist/
+      # artefak rilis). Exclusion testdata & gen/ relevan tetap di blok rules di atas.
+      - bin
+      - dist
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      # Kelompokkan import lokal builder di blok terpisah.
+      local-prefixes:
+        - github.com/faisalcayunda/gostarter
+  exclusions:
+    paths:
+      - internal/golden/testdata/

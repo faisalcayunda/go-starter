@@ -1,0 +1,26 @@
+# Biner hasil kompilasi
+/bin/
+/demo-chi
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Output test & coverage
+*.test
+*.out
+coverage.*
+
+# Environment lokal (jangan commit kredensial)
+.env
+.env.local
+
+# Artefak editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Direktori kerja Go
+/vendor/

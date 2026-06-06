@@ -1,0 +1,49 @@
+# .pre-commit-config.yaml — hook pre-commit untuk repo BUILDER (gostarter).
+#
+# Memakai framework `pre-commit` (https://pre-commit.com). Pasang sekali dengan:
+#     pip install pre-commit        # atau: brew install pre-commit
+#     pre-commit install            # memasang .git/hooks/pre-commit
+#
+# Alternatif tanpa dependency Python: pakai scripts/pre-commit + `make install-hooks`.
+#
+# Semua hook dijalankan via `system` agar memakai toolchain Go/golangci-lint dari
+# PATH (asdf) — bukan men-download ulang versi berbeda.
+repos:
+  - repo: local
+    hooks:
+      # 1. gofmt — wajib terformat. Gagal bila ada file Go belum di-format.
+      #    Entry dibungkus YAML block scalar (|) agar isi bash (mengandung ':')
+      #    aman dari parser YAML.
+      #    M-2: KECUALIKAN internal/golden/testdata/** — pohon hasil render (snapshot
+      #    golden byte-identical), bukan kode builder; mem-format-nya merusak invarian.
+      - id: gofmt
+        name: gofmt
+        entry: |
+          bash -c 'u=$(gofmt -l cmd internal | grep -v "^internal/golden/testdata/" || true); if [ -n "$u" ]; then printf "File belum di-gofmt (jalankan make fmt)\n%s\n" "$u"; exit 1; fi'
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      # 2. go vet — analisis statik bawaan toolchain.
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      # 3. golangci-lint — gerbang lint utama (config .golangci.yml).
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      # 4. go test cepat — unit test tanpa cache, tanpa e2e (e2e di CI saja).
+      - id: go-test
+        name: go test (cepat)
+        entry: go test ./...
+        language: system
+        types: [go]
+        pass_filenames: false

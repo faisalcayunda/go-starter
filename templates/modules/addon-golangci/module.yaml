@@ -1,0 +1,24 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul addon-golangci: konfigurasi golangci-lint (.golangci.yml). File standalone
+# milik modul ini (tak ada anchor/merge). Aktif bila .Lint true (module-level
+# gating di resolver). Tidak membawa dependency go.mod (golangci-lint = tool CLI).
+name: addon-golangci
+description: >-
+  Konfigurasi golangci-lint (.golangci.yml) yang wajar untuk Go 1.26: linter inti
+  aktif (govet, staticcheck, errcheck, dll.) tanpa setting agresif yang memecah
+  project hasil generate.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# .golangci.yml mode copy — bukan Go, tak perlu gofmt; tak ada placeholder dinamis.
+files:
+  - template: golangci.yml.tmpl
+    target:   .golangci.yml
+    mode:     copy
+
+gomod: []
+
+requires: []
+conflicts: []
+contributes: []
+
+vars: {}

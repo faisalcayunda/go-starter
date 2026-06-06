@@ -1,0 +1,66 @@
+// Package database menyediakan koneksi MySQL via database/sql stdlib + driver
+// go-sql-driver/mysql. DSN dibangun dari environment (DATABASE_URL atau komponen
+// DB_*). *sql.DB dipakai lapisan akses query.
+package database
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"time"
+
+	// Driver MySQL didaftarkan via efek samping import (sql.Register "mysql").
+	// database/sql dari stdlib yang menjadi antarmuka query — driver hanya plumbing.
+	_ "github.com/go-sql-driver/mysql"
+)
+
+// Connect membuka pool koneksi MySQL dan memverifikasinya dengan PingContext.
+// DSN diambil dari env DATABASE_URL bila ada; selain itu dirakit dari DB_HOST,
+// DB_PORT, DB_USER, DB_PASSWORD, DB_NAME. Pemanggil bertanggung jawab memanggil
+// db.Close() saat shutdown.
+func Connect(ctx context.Context) (*sql.DB, error) {
+	db, err := sql.Open("mysql", dsn())
+	if err != nil {
+		return nil, fmt.Errorf("mysql: open: %w", err)
+	}
+
+	// Batas pool wajar untuk skeleton; sesuaikan dengan beban produksi.
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("mysql: ping: %w", err)
+	}
+	return db, nil
+}
+
+// dsn mengembalikan connection string MySQL (format go-sql-driver/mysql).
+// DATABASE_URL diutamakan; bila kosong, DSN dirakit dari komponen DB_*
+// (default sesuai .env.example). parseTime=true agar kolom DATE/DATETIME
+// dipetakan ke time.Time.
+func dsn() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
+	}
+	return fmt.Sprintf(
+		"%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&loc=UTC",
+		envOr("DB_USER", "{{ .DBUser }}"),
+		envOr("DB_PASSWORD", "mysql"),
+		envOr("DB_HOST", "localhost"),
+		envOr("DB_PORT", "{{ .DBPort }}"),
+		envOr("DB_NAME", "{{ .DBName }}"),
+	)
+}
+
+// envOr mengembalikan nilai env key bila ada & non-kosong, selain itu fallback.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

@@ -1,0 +1,165 @@
+# CI repo BUILDER gostarter.
+#
+# Workflow ini menguji REPOSITORY BUILDER (generator CLI gostarter), bukan project
+# hasil generate. Empat job:
+#   - lint  : golangci-lint run atas kode builder.
+#   - test  : go test atas seluruh unit test builder KECUALI ./internal/golden/...
+#             (resolver, template, modpath, merge, registry — Fase 5 T5.1). Golden
+#             SENGAJA dikecualikan di sini agar tidak dijalankan dua kali (lihat job
+#             'golden' di bawah). Matrix go-version menjalankan job ini pada FLOOR
+#             go.mod (1.25.x) DAN versi terbaru (1.26.x) — H-1: membuktikan builder
+#             kompatibel di seluruh rentang Go yang didukung, bukan hanya yang
+#             terbaru.
+#   - golden: go test ./internal/golden/ (snapshot byte-identical kombinasi kunci —
+#             Fase 5 T5.2). Di-skip otomatis bila paket golden belum ada. Inilah
+#             SATU-SATUNYA tempat golden dijalankan di CI (job 'test' mengecualikannya
+#             via `go list | grep -v internal/golden`) — menghindari double-run.
+#   - e2e   : matrix Go × skrip e2e. Tiap kombinasi membuktikan generate → vet/build/
+#             test per arsitektur (monolith/modular/microservice) dengan menjalankan
+#             scripts/matrix-4a.sh + microservice-e2e.sh + smoke.sh. Inilah bukti
+#             bahwa generator menghasilkan project yang vet/build/test HIJAU untuk
+#             setiap kombinasi wajib (db=none offline murni stdlib s/d full addons).
+#
+# Catatan: skrip e2e menangani ketiadaan Docker dengan SKIP (bukan kegagalan), jadi
+# job berjalan utuh pada runner GitHub. buf + protoc-gen-go + protoc-gen-go-grpc
+# dipasang via `go install` (mendarat di $(go env GOPATH)/bin) lalu ditambahkan ke
+# PATH agar hook `buf generate` saat `gostarter create` microservice berfungsi.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Batalkan run lama pada ref yang sama saat ada push baru (hemat antrean CI).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── lint: golangci-lint atas kode builder ─────────────────────────────────────
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.12.2
+
+  # ── test: unit test builder (matrix go-version: floor go.mod + terbaru) ───────
+  # H-1: matrix menjalankan unit test pada FLOOR go.mod (1.25.x) DAN versi terbaru
+  # (1.26.x) — membuktikan builder kompatibel di seluruh rentang Go yang didukung.
+  # H-3: golden DIKECUALIKAN di sini (go list | grep -v internal/golden) agar tidak
+  # dijalankan dua kali; job 'golden' di bawah adalah satu-satunya pengujian golden.
+  test:
+    name: test (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.25.x', '1.26.x']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: go build (sanity)
+        run: go build ./...
+
+      - name: go test (kecuali golden — lihat job 'golden')
+        run: go test $(go list ./... | grep -v internal/golden) -count=1
+
+  # ── golden: snapshot kombinasi kunci (Fase 5 T5.2) ────────────────────────────
+  # Di-skip mulus bila paket internal/golden belum ada (dikerjakan di track lain).
+  # H-3: ini SATU-SATUNYA tempat golden dijalankan di CI. Job 'test' mengecualikan
+  # ./internal/golden/... lewat `go list | grep -v internal/golden`, jadi tidak ada
+  # double-run. Konsisten dengan Makefile: target 'test' mengecualikan golden dengan
+  # cara yang sama, dan 'golden-verify' (dipanggil oleh 'ci') adalah satu-satunya
+  # pemeriksa golden secara lokal — cermin job ini.
+  golden:
+    name: golden
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+
+      - name: go test ./internal/golden/
+        run: |
+          if [ -d ./internal/golden ]; then
+            go test ./internal/golden/ -count=1
+          else
+            echo "internal/golden belum ada — golden test dilewati."
+          fi
+
+  # ── e2e: matrix Go × skrip e2e (generate → vet/build/test per kombinasi) ──────
+  # Matrix Go membuktikan generator menghasilkan project yang vet/build/test HIJAU
+  # untuk setiap kombinasi wajib pada tiap versi Go yang didukung.
+  e2e:
+    name: e2e (go ${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # H-1: e2e juga melintang floor go.mod (1.25.x) + terbaru (1.26.x) — bukti
+        # generator menghasilkan project vet/build/test HIJAU di seluruh rentang Go.
+        go: ['1.25.x', '1.26.x']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Install buf + protoc plugins
+        # buf + plugin protobuf dibutuhkan hook `buf generate` saat membuat
+        # microservice. `go install` menaruh binary di $(go env GOPATH)/bin.
+        run: |
+          go install github.com/bufbuild/buf/cmd/buf@latest
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Verifikasi toolchain
+        run: |
+          go version
+          buf --version
+          protoc-gen-go --version || true
+          protoc-gen-go-grpc --version || true
+
+      - name: e2e — matrix arsitektur (monolith/modular, db none/postgres/mysql)
+        run: bash scripts/matrix-4a.sh
+
+      - name: e2e — microservice (svc-a→svc-b gRPC, add service, gen di-commit)
+        run: bash scripts/microservice-e2e.sh
+
+      - name: e2e — smoke (db=none offline + full addons)
+        run: bash scripts/smoke.sh

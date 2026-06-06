@@ -1,0 +1,7 @@
+	// region:wiring (db-mysql) — buka pool koneksi MySQL dari env DSN.
+	db, err := database.Connect(ctx)
+	if err != nil {
+		logger.Error("connect mysql", "error", err)
+		os.Exit(1)
+	}
+	defer db.Close()

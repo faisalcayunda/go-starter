@@ -1,0 +1,99 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul db-postgres: driver PostgreSQL (pgxpool + sqlx) + skeleton DB + migrasi
+# awal + kontribusi service compose, env, wiring main, dan target migrate Makefile.
+# Dep go.mod dialirkan via gomod: (modfile.Format). Modul ini aktif HANYA bila
+# db=postgres (module-level gating di resolver) → menambah dep eksternal (build
+# butuh jaringan). golang-migrate dipakai via Makefile target (komentar/run),
+# TIDAK di-import di kode agar go build tak butuh runtime migrate.
+name: db-postgres
+description: >-
+  PostgreSQL (pgxpool + sqlx): skeleton koneksi DB dari env DSN + migrasi awal,
+  plus kontribusi service & volume ke docker-compose.yml, blok env ke .env.example,
+  wiring init DB ke main, dan target migrate ke Makefile.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# Migrasi .sql disalin apa adanya (mode copy) — bukan Go, tak perlu render/gofmt.
+files:
+  - template: database/postgres.go.tmpl
+    target:   internal/platform/database/postgres.go
+    mode:     render
+  - template: migrations/0001_init.up.sql.tmpl
+    target:   migrations/0001_init.up.sql
+    mode:     copy
+  - template: migrations/0001_init.down.sql.tmpl
+    target:   migrations/0001_init.down.sql
+    mode:     copy
+
+# Dependency go.mod dialirkan via gomod: (dirakit modfile.Format, ADR-002 §6).
+# Fase 3: HANYA pgx/v5 (driver + pgxpool) — satu-satunya dep yang BENAR-BENAR
+# di-import oleh skeleton (database/postgres.go). github.com/jmoiron/sqlx SENGAJA
+# TIDAK dicantumkan di Fase 3 (C-2): lapisan akses query sqlx belum punya kode yang
+# meng-import-nya, sehingga bila ditambahkan ia akan langsung di-prune oleh
+# `go mod tidy` (go.mod project tidak jujur). Lapisan akses sqlx menyusul di Fase 4
+# (saat ada repository.go yang memakai sqlx.DB). golang-migrate juga TIDAK di gomod:
+# — ia tool CLI dipakai via Makefile, bukan import.
+gomod:
+  - path:    github.com/jackc/pgx/v5
+    version: v5.10.0
+
+# core menyediakan anchor "wiring" di main + "database" di .env.example +
+# "services"/"volumes" di compose. db-postgres menyisip ke sana.
+requires:
+  - core
+
+# Driver DB lain (mutual exclusive).
+conflicts:
+  - db-mysql
+  - db-sqlite
+  - db-mongo
+
+# Kontribusi merge: service & volume ke compose (hanya bila Docker aktif, C14),
+# blok env ke .env.example, wiring init DB ke main, target migrate ke Makefile
+# (hanya bila tool migrasi terpilih). `when` gaya text/template kanonik (ADR-002 §5).
+# Anchor selaras ADR-002/ADR-003: compose → services/volumes; env → database;
+# main → wiring; Makefile → db-targets.
+contributes:
+  - target:   docker-compose.yml
+    anchor:   services
+    fragment: fragments/compose.postgres.service.yml.tmpl
+    order:    20
+    when:     ".Docker"
+  - target:   docker-compose.yml
+    anchor:   volumes
+    fragment: fragments/compose.postgres.volume.yml.tmpl
+    order:    20
+    when:     ".Docker"
+  - target:   .env.example
+    anchor:   database
+    fragment: fragments/env.postgres.tmpl
+    order:    20
+    when:     ".EnvExample"
+  # AUTO-WIRE (anchor region:imports): kini blok import main memiliki anchor
+  # region:imports, sehingga fragment merge BISA menambah import paket database —
+  # menghapus keterbatasan Fase 3 ("merge tak bisa tambah import"). db-postgres
+  # menyumbang import paket database + wiring database.Connect(ctx) ke main saat
+  # db=postgres. Pool dibuka & defer pool.Close() — pustaka koneksi siap-pakai
+  # ter-wire otomatis (bukan sekadar library-only). go build hijau (Connect hanya
+  # konek/ping di RUNTIME, bukan saat build). order 20 selaras kontribusi lain.
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   imports
+    fragment: fragments/main.imports.postgres.tmpl
+    order:    20
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   wiring
+    fragment: fragments/main.wiring.postgres.tmpl
+    order:    20
+  # Target migrate hanya disisip bila Makefile aktif (skeleton dimiliki core,
+  # gated .Makefile) DAN tool migrasi terpilih. Tanpa gate .Makefile, kontribusi
+  # ini menjadi target merge yatim (skeleton Makefile tak diproduksi) → fail-fast.
+  - target:   Makefile
+    anchor:   targets
+    fragment: fragments/make.migrate.tmpl
+    order:    20
+    when:     "and .Makefile (ne .Migrate \"\")"
+
+# Vars default; map[string]any → nilai non-string muat (DBPort: 5432).
+vars:
+  DBPort: 5432
+  DBName: app
+  DBUser: app

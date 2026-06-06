@@ -1,0 +1,37 @@
+# GitLab CI — lint, test, build untuk project Go.
+# Stage lint hanya hadir bila golangci-lint dikonfigurasi (add-on lint aktif).
+# go-version dipin via var GoVersion agar selaras directive go.mod project.
+stages:
+{{- if .Lint }}
+  - lint
+{{- end }}
+  - test
+  - build
+
+variables:
+  # Cache modul Go di dalam workspace agar bisa di-cache antar-job.
+  GOPATH: "$CI_PROJECT_DIR/.go"
+
+cache:
+  paths:
+    - .go/pkg/mod/
+{{- if .Lint }}
+
+lint:
+  stage: lint
+  image: golangci/golangci-lint:latest
+  script:
+    - golangci-lint run ./...
+{{- end }}
+
+test:
+  stage: test
+  image: golang:{{ .GoVersion }}
+  script:
+    - go test ./...
+
+build:
+  stage: build
+  image: golang:{{ .GoVersion }}
+  script:
+    - go build ./...

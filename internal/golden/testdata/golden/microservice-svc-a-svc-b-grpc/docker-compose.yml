@@ -1,0 +1,33 @@
+# docker-compose.yml — orkestrasi seluruh service monorepo (ber-anchor, dirakit
+# ModeMerge oleh assembler). Tiap service microservice menyumbang satu blok ke
+# anchor region:services; modul DB (bila aktif) menyumbang service + volume-nya.
+services:
+  # service "svc-a" (arch-microservice).
+  svc-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: svc-a
+    env_file:
+      - .env
+    # Service pertama mengekspos HTTP /call (bukti inter-service call).
+    ports:
+      - "8081:8081"
+    depends_on:
+      - svc-b
+    restart: unless-stopped
+  # service "svc-b" (arch-microservice).
+  svc-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: svc-b
+    env_file:
+      - .env
+    restart: unless-stopped
+  # region:services keep
+
+volumes:
+  # region:volumes

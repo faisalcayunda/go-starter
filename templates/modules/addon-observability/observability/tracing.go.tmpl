@@ -1,0 +1,51 @@
+// Package observability menyediakan tracing OpenTelemetry, metrics Prometheus,
+// dan health check sebagai pustaka siap-pakai. Paket ini berdiri sendiri
+// (self-contained import) sehingga go build hijau tanpa wiring paksa ke server.
+//
+// Wiring (opsional, contoh):
+//
+//	tp, err := observability.SetupTracing(ctx, "myservice")
+//	if err != nil { ... }
+//	defer tp.Shutdown(context.Background())
+//
+//	mux.Handle("/metrics", observability.MetricsHandler())
+//	mux.HandleFunc("/healthz", observability.Health)
+//	handler = observability.WrapHTTP(mux, "myservice") // instrumentasi otelhttp
+package observability
+
+import (
+	"context"
+	"fmt"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+// SetupTracing menginisialisasi TracerProvider global OpenTelemetry dengan
+// exporter stdout (default offline-safe). Untuk mengirim ke collector OTLP,
+// ganti exporter dengan otlptracehttp/otlptracegrpc dan set endpoint dari env
+// OTEL_EXPORTER_OTLP_ENDPOINT. Pemanggil bertanggung jawab memanggil
+// tp.Shutdown(ctx) saat aplikasi berhenti agar span ter-flush.
+func SetupTracing(ctx context.Context, serviceName string) (*sdktrace.TracerProvider, error) {
+	exporter, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	if err != nil {
+		return nil, fmt.Errorf("observability: stdout trace exporter: %w", err)
+	}
+
+	res, err := resource.New(ctx,
+		resource.WithAttributes(semconv.ServiceName(serviceName)),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("observability: resource: %w", err)
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exporter),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+	return tp, nil
+}

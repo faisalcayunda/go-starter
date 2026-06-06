@@ -1,0 +1,14 @@
+# buf.yaml — konfigurasi workspace buf (v2). Kontrak proto hidup di proto/.
+# Lint & breaking-change detection bawaan menjaga kualitas kontrak sejak awal.
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  # Service tunggal per file (Ping) → nama file tak wajib cocok aturan paket ketat.
+  except:
+    - PACKAGE_DIRECTORY_MATCH
+breaking:
+  use:
+    - FILE

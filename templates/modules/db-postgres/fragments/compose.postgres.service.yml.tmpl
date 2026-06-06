@@ -1,0 +1,11 @@
+  # region:services (db-postgres) — service PostgreSQL.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: {{ .DBName }}
+      POSTGRES_USER: {{ .DBUser }}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "{{ .DBPort }}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data

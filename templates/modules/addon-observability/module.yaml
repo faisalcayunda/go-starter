@@ -1,0 +1,87 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul addon-observability: OpenTelemetry tracing (exporter stdout default, OTLP
+# opsional) + Prometheus /metrics + health, sebagai PUSTAKA SIAP-PAKAI di paket
+# internal/platform/observability. Aktif bila .Obs true (module-level gating di
+# resolver) → menambah dep eksternal (build butuh jaringan).
+#
+# KEPUTUSAN WIRING (AUTO-WIRE): server.go kini memiliki anchor region:imports DI
+# DALAM blok import-nya (semua varian: net/http, chi, echo × monolith, modular),
+# sehingga fragment merge BISA menambah import — keterbatasan Fase 3 ("merge tak
+# bisa tambah import") TERATASI. addon-observability MENG-AUTO-WIRE:
+#   1. import alias `obs "<module>/internal/platform/observability"` → region:imports
+#      server (saat .Obs aktif via module-level gating).
+#   2. endpoint /metrics Prometheus → region:routes server (varian per framework:
+#      mux.Handle untuk net/http, r.Handle untuk chi, e.GET+WrapHandler untuk echo).
+# Dengan begitu /metrics AUTO-AKTIF begitu Obs dipilih (bukan lagi library-only).
+# go build hijau: obs.MetricsHandler() ada di paket internal/platform/observability
+# yang ikut ter-emit saat .Obs. otelhttp tetap tersedia via obs.WrapHTTP (helper)
+# untuk instrumentasi tracing per-handler. Kontribusi env OTEL ke .env.example tetap.
+name: addon-observability
+description: >-
+  Observability siap-pakai: tracing OpenTelemetry (exporter stdout default, OTLP
+  opsional), endpoint /metrics Prometheus, dan health handler — di paket
+  internal/platform/observability. Menyumbang var OTEL ke .env.example.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# Tiga paket .go STATIK MURNI (tanpa sintaks {{ }}) → mode: copy (MAJ-4). Disalin
+# byte-mentah dari embed.FS via Renderer.Raw (bypass total template engine), bukan
+# dirender. Aman karena ketiganya sudah gofmt-clean apa adanya; copy TIDAK melewatkan
+# go/format (hanya render/merge yang gofmt), maka sumber WAJIB tetap gofmt-valid.
+# Aktif selama modulnya aktif (.Obs).
+files:
+  - template: observability/tracing.go.tmpl
+    target:   internal/platform/observability/tracing.go
+    mode:     copy
+  - template: observability/metrics.go.tmpl
+    target:   internal/platform/observability/metrics.go
+    mode:     copy
+  - template: observability/health.go.tmpl
+    target:   internal/platform/observability/health.go
+    mode:     copy
+
+# Dependency go.mod dialirkan via gomod: (dirakit modfile.Format, ADR-002 §6).
+# Kelima modul ini BENAR-BENAR di-import paket observability (tracing/metrics) →
+# tak akan di-prune go mod tidy. semconv ikut modul otel root (bukan dep terpisah);
+# otel/trace & otel/metric ikut transitif sdk (indirect). Versi stabil terbaru
+# (diverifikasi go list, 2026-06-06): otel v1.44.0, sdk v1.44.0, stdouttrace v1.44.0,
+# otelhttp contrib v0.69.0, prometheus client v1.23.2.
+gomod:
+  - path:    github.com/prometheus/client_golang
+    version: v1.23.2
+  - path:    go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp
+    version: v0.69.0
+  - path:    go.opentelemetry.io/otel
+    version: v1.44.0
+  - path:    go.opentelemetry.io/otel/exporters/stdout/stdouttrace
+    version: v1.44.0
+  - path:    go.opentelemetry.io/otel/sdk
+    version: v1.44.0
+
+# core menyediakan anchor "app" di .env.example yang disisipi blok env OTEL.
+requires:
+  - core
+
+conflicts: []
+
+# Kontribusi merge. (a) var OTEL ke anchor "app" .env.example milik core (order 30 >
+# core app 0 & addon-env app 5 → blok OTEL setelah var dasar). (b) AUTO-WIRE: import
+# alias obs → region:imports server + endpoint /metrics → region:routes server.
+# Target server.go dimiliki core (net/http monolith), arch-modular (net/http modular),
+# atau http-chi/http-echo (per .HTTP) — keduanya men-declare region:imports & region:
+# routes, sehingga D6.5 anchor↔skeleton lolos. `when` gaya text/template (ADR-002 §5).
+contributes:
+  - target:   .env.example
+    anchor:   app
+    fragment: fragments/env.obs.tmpl
+    order:    30
+    when:     ".EnvExample"
+  - target:   internal/httpserver/server.go
+    anchor:   imports
+    fragment: fragments/server.imports.obs.tmpl
+    order:    30
+  - target:   internal/httpserver/server.go
+    anchor:   routes
+    fragment: fragments/server.routes.obs.tmpl
+    order:    30
+
+vars: {}

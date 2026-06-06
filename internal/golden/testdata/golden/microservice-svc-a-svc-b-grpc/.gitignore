@@ -1,0 +1,28 @@
+# Biner hasil kompilasi
+/bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Output test & coverage
+*.test
+*.out
+coverage.*
+
+# Environment lokal (jangan commit kredensial)
+.env
+.env.local
+
+# Artefak editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Direktori kerja Go
+/vendor/
+
+# CATATAN: gen/ TIDAK di-ignore — stub gRPC hasil `buf generate` DI-COMMIT agar
+# `go build ./...` hijau tanpa menjalankan buf (riset 02 §4 keputusan turunan).

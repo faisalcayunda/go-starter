@@ -1,0 +1,23 @@
+# buf.gen.yaml — konfigurasi code generation buf (v2).
+#
+# Managed mode memindahkan opsi go_package keluar dari .proto: go_package =
+# <module>/gen/go/<path-proto> (prefix di bawah). Output ke gen/go/** (DI-COMMIT).
+# Plugin resmi: protoc-gen-go (message) + protoc-gen-go-grpc (server/client stub).
+#
+# Catatan zero lock-in: hasil .pb.go hanya bergantung google.golang.org/protobuf
+# & google.golang.org/grpc — tak ada import bufbuild/* maupun builder.
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/example/demo-ms/gen/go
+plugins:
+  - local: protoc-gen-go
+    out: gen/go
+    opt:
+      - paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: gen/go
+    opt:
+      - paths=source_relative

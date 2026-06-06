@@ -1,0 +1,47 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul addon-makefile: target Makefile standar (run, fmt, lint, docker-build).
+# Skeleton Makefile (target build/test + anchor "targets") DIMILIKI core; addon
+# ini hanya MENYUMBANG target tambahan ke anchor "targets" — menghindari double
+# ownership & duplikasi (target migrate disumbang db-postgres). Aktif bila
+# .Makefile true (module-level gating di resolver).
+name: addon-makefile
+description: >-
+  Target Makefile standar tambahan (run, fmt, lint, docker-build) yang disisip ke
+  anchor "targets" milik core. Target build/test sudah dimiliki skeleton core.
+
+# addon-makefile tidak memiliki file sendiri — murni penyumbang ke Makefile core.
+files: []
+
+gomod: []
+
+# core memiliki skeleton Makefile (anchor "targets") yang disisipi addon ini.
+requires:
+  - core
+
+conflicts: []
+
+# Kontribusi merge: target tambahan ke anchor "targets" milik core.
+# order 10 < db-postgres (20) → target umum muncul sebelum target migrate.
+# Target lint/docker-build di-gate `when` agar hanya muncul bila relevan
+# (lint butuh .Lint; docker-build butuh .Docker). `when` gaya text/template (ADR-002 §5).
+contributes:
+  - target:   Makefile
+    anchor:   targets
+    fragment: fragments/make.run.tmpl
+    order:    10
+  - target:   Makefile
+    anchor:   targets
+    fragment: fragments/make.fmt.tmpl
+    order:    11
+  - target:   Makefile
+    anchor:   targets
+    fragment: fragments/make.lint.tmpl
+    order:    12
+    when:     ".Lint"
+  - target:   Makefile
+    anchor:   targets
+    fragment: fragments/make.docker.tmpl
+    order:    13
+    when:     ".Docker"
+
+vars: {}

@@ -1,0 +1,32 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul addon-env: variabel environment generik tambahan (ENV, LOG_LEVEL) ke
+# .env.example. Skeleton .env.example + fragmen app dasar (APP_NAME/APP_PORT)
+# DIMILIKI core; addon-env hanya MENYUMBANG vars tambahan ke anchor "app" milik
+# core — menghindari double ownership & duplikasi. Aktif bila .EnvExample true.
+name: addon-env
+description: >-
+  Variabel environment generik tambahan (ENV, LOG_LEVEL) yang disisip ke anchor
+  "app" .env.example milik core. Skeleton & vars dasar dimiliki core.
+
+# addon-env tidak memiliki file sendiri — murni penyumbang ke .env.example core.
+files: []
+
+gomod: []
+
+# core memiliki skeleton .env.example (anchor app/database/broker) yang disisipi.
+requires:
+  - core
+
+conflicts: []
+
+# Kontribusi merge: vars generik ke anchor "app" milik core. order 5 > core app (0)
+# → vars dasar core (APP_NAME/APP_PORT) muncul lebih dulu, lalu tambahan addon ini.
+# `when` gaya text/template kanonik (ADR-002 §5) — hanya bila .EnvExample.
+contributes:
+  - target:   .env.example
+    anchor:   app
+    fragment: fragments/env.app.extra.tmpl
+    order:    5
+    when:     ".EnvExample"
+
+vars: {}

@@ -1,0 +1,95 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul `core` adalah pemilik skeleton file shared lintas-arsitektur:
+# go.mod (dirakit via gomod:, BUKAN fragment), docker-compose.yml, Makefile,
+# .env.example, README.md, .gitignore, dan skeleton wiring main. Selalu aktif.
+name: core
+description: >-
+  Skeleton project dasar netral-arsitektur: entrypoint main, .env.example,
+  docker-compose.yml, dan Makefile ber-anchor (kosong-by-default). Modul lain
+  menyumbang fragmen ke anchor-anchor ini lewat `contributes`.
+
+# files[] memakai skema FileSpec kanonik {template, target, mode, when}.
+# mode: "render" (default) | "copy" | "mkdir". go.mod TIDAK di sini — ia dirakit
+# dari gomod: semua modul aktif via modfile.Format (ADR-002 §6).
+files:
+  # cmd/<app>/main.go core = composition root LAYERED (mendelegasikan ke
+  # internal/app.Run). Spesifik monolith → digate eq .Arch "monolith". Untuk
+  # modular, arch-modular memiliki main.go-nya sendiri (composition root tunggal
+  # tanpa internal/app). Tanpa gate ini kedua modul menghasilkan target yang sama
+  # → silent-overwrite & file yatim (pelajaran Fase 3).
+  - template: cmd/main.go.tmpl
+    target:   cmd/{{ modBase .ModulePath }}/main.go
+    mode:     render
+    when:     "eq .Arch \"monolith\""
+  # config loader = NETRAL arsitektur → selalu dari core (monolith & modular).
+  - template: config/config.go.tmpl
+    target:   internal/config/config.go
+    mode:     render
+  # server.go net/http core hanya aktif untuk monolith + net/http. chi/echo
+  # menggantikannya (modul http-*, digate per .HTTP); modular memiliki server.go
+  # netral-domain sendiri (semua framework). Gate ganda mencegah triple-ownership
+  # internal/httpserver/server.go (core ∥ arch-modular ∥ http-*).
+  - template: httpserver/server.go.tmpl
+    target:   internal/httpserver/server.go
+    mode:     render
+    when:     "and (eq .Arch \"monolith\") (eq .HTTP \"net/http\")"
+  # health.go core = health check monolith → digate monolith (modular punya
+  # health.go sendiri di paket httpserver netral-domainnya). STATIK MURNI (tanpa
+  # {{ }}) → mode: copy (MAJ-4); sumber sudah gofmt-clean.
+  - template: httpserver/health.go.tmpl
+    target:   internal/httpserver/health.go
+    mode:     copy
+    when:     "eq .Arch \"monolith\""
+  # handler contoh = layout monolith (internal/handler) → digate monolith. Pada
+  # modular tiap domain memiliki handler-nya sendiri di internal/modules/<d>/...
+  # STATIK MURNI → mode: copy (MAJ-4); sumber sudah gofmt-clean.
+  - template: handler/example.go.tmpl
+    target:   internal/handler/example.go
+    mode:     copy
+    when:     "eq .Arch \"monolith\""
+  - template: handler/example_test.go.tmpl
+    target:   internal/handler/example_test.go
+    mode:     copy
+    when:     "eq .Arch \"monolith\""
+  # README monolith → digate monolith. Modular memiliki README modular sendiri.
+  - template: README.md.tmpl
+    target:   README.md
+    mode:     render
+    when:     "eq .Arch \"monolith\""
+  - template: gitignore.tmpl
+    target:   .gitignore
+    mode:     render
+  - template: env.example.tmpl
+    target:   .env.example
+    mode:     render
+    when:     ".EnvExample"
+  - template: docker-compose.yml.tmpl
+    target:   docker-compose.yml
+    mode:     render
+    when:     ".Docker"
+  - template: Makefile.tmpl
+    target:   Makefile
+    mode:     render
+    when:     ".Makefile"
+
+# Dependency go.mod dialirkan via gomod: (dirakit modfile.Format). core
+# zero-dep eksternal (hanya stdlib).
+gomod: []
+
+# Modul `core` selalu aktif; tidak menuntut atau berkonflik dengan modul lain.
+requires: []
+conflicts: []
+
+# Kontribusi merge ke file shared milik core. Anchor selaras ADR-002/ADR-003:
+# .env.example → app/database/broker; docker-compose.yml → services/volumes.
+# `when` memakai ekspresi gaya text/template kanonik (ADR-002 §5).
+contributes:
+  - target:   .env.example
+    anchor:   app
+    fragment: fragments/env.app.tmpl
+    order:    0
+    when:     ".EnvExample"
+
+# Vars default core; map[string]any → nilai non-string muat (mis. AppPort: 8080).
+vars:
+  AppPort: 8080

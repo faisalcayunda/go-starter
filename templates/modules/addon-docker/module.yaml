@@ -1,0 +1,42 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul addon-docker: Dockerfile multi-stage + kontribusi service `app` ke
+# docker-compose.yml. Skeleton compose (anchor services/volumes) DIMILIKI core
+# (ADR-002 §1.1 — boleh core atau addon-docker; di katalog ini core memegangnya).
+# addon-docker hanya MENYUMBANG service app ke anchor "services" milik core +
+# memiliki Dockerfile. Aktif bila .Docker true (module-level gating di resolver).
+name: addon-docker
+description: >-
+  Dockerfile multi-stage (builder golang + runtime distroless) + kontribusi
+  service `app` ke docker-compose.yml. Skeleton compose dimiliki core; addon ini
+  menyisip blok app ke anchor services.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}.
+# Dockerfile mode copy (bukan Go, tak perlu gofmt) — placeholder template tetap
+# bisa dirender; pakai render agar {{ modBase .ModulePath }} (nama biner) terisi.
+files:
+  - template: Dockerfile.tmpl
+    target:   Dockerfile
+    mode:     render
+  - template: dockerignore.tmpl
+    target:   .dockerignore
+    mode:     render
+
+gomod: []
+
+# core memiliki skeleton compose (anchor services/volumes) yang disisipi addon ini.
+requires:
+  - core
+
+conflicts: []
+
+# Kontribusi merge: service app ke anchor "services" milik core. order 10 < db (20)
+# agar app muncul sebelum service DB (urutan deterministik, byte-identical).
+contributes:
+  - target:   docker-compose.yml
+    anchor:   services
+    fragment: fragments/compose.app.yml.tmpl
+    order:    10
+
+vars:
+  # GoImage dipakai stage builder; pin minor agar reproducible (boleh dibump MINOR).
+  GoImage: "golang:1.26-alpine"
