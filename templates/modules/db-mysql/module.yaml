@@ -18,9 +18,13 @@ description: >-
 # files[] skema FileSpec kanonik {template, target, mode, when}.
 # Migrasi .sql disalin apa adanya (mode copy) — bukan Go, tak perlu render/gofmt.
 files:
+  # Koneksi database/sql default. DI-GATE `ne .Access "gorm"`: bila access=gorm,
+  # file koneksi ini TIDAK di-emit (digantikan internal/platform/database/gorm.go
+  # milik access-gorm-mysql) sehingga TEPAT SATU mekanisme akses ter-emit.
   - template: database/mysql.go.tmpl
     target:   internal/platform/database/mysql.go
     mode:     render
+    when:     "ne .Access \"gorm\""
   - template: migrations/0001_init.up.sql.tmpl
     target:   migrations/0001_init.up.sql
     mode:     copy
@@ -76,14 +80,18 @@ contributes:
     fragment: fragments/env.mysql.tmpl
     order:    20
     when:     ".EnvExample"
+  # AUTO-WIRE database/sql DI-GATE `ne .Access "gorm"`: saat access=gorm, wiring
+  # koneksi database/sql diganti wiring GORM milik access-gorm-mysql.
   - target:   cmd/{{ modBase .ModulePath }}/main.go
     anchor:   imports
     fragment: fragments/main.imports.mysql.tmpl
     order:    20
+    when:     "ne .Access \"gorm\""
   - target:   cmd/{{ modBase .ModulePath }}/main.go
     anchor:   wiring
     fragment: fragments/main.wiring.mysql.tmpl
     order:    20
+    when:     "ne .Access \"gorm\""
   - target:   Makefile
     anchor:   targets
     fragment: fragments/make.migrate.tmpl

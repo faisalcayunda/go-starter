@@ -83,6 +83,7 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 		arch       = string(answers.ArchMonolith)
 		httpFw     = string(answers.HTTPNetHTTP)
 		db         = string(answers.DBNone)
+		access     = string(answers.AccessSQLx)
 		git        = p.DefaultGit
 		addons     = []string{addonMakefile, addonGolangci, addonEnv, addonCI}
 		ciProvider = string(answers.CIGitHubActions)
@@ -166,11 +167,28 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 				Title("Pakai database?").
 				Options(
 					huh.NewOption("Tidak (none) — murni stdlib", string(answers.DBNone)),
-					huh.NewOption("PostgreSQL (pgx/v5 + sqlx + golang-migrate)", string(answers.DBPostgres)),
-					huh.NewOption("MySQL (go-sql-driver/mysql + sqlx + golang-migrate)", string(answers.DBMySQL)),
+					huh.NewOption("PostgreSQL (pgx/v5 + golang-migrate)", string(answers.DBPostgres)),
+					huh.NewOption("MySQL (go-sql-driver/mysql + golang-migrate)", string(answers.DBMySQL)),
 				).
 				Value(&db),
 		).WithHideFunc(func() bool { return arch == string(answers.ArchMicroservice) }),
+		// Grup q_access — lapisan akses query. HANYA muncul bila db∈{postgres,mysql}
+		// (C2; access tak relevan db=none) DAN bukan microservice. gorm mengaktifkan
+		// jalur GORM (koneksi gorm.Open + model + repository) menggantikan koneksi
+		// sqlx/pgxpool/database-sql default.
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Lapisan akses query?").
+				Options(
+					huh.NewOption("sqlx (jmoiron/sqlx — default)", string(answers.AccessSQLx)),
+					huh.NewOption("database/sql (stdlib)", string(answers.AccessDatabaseSQL)),
+					huh.NewOption("GORM (gorm.io/gorm + driver)", string(answers.AccessGORM)),
+				).
+				Value(&access),
+		).WithHideFunc(func() bool {
+			return arch == string(answers.ArchMicroservice) ||
+				(db != string(answers.DBPostgres) && db != string(answers.DBMySQL))
+		}),
 		// Grup 5 — add-ons multiselect (subset Fase 4a). Disembunyikan untuk
 		// microservice (v1 micro menyediakan docker/makefile/compose bawaan).
 		huh.NewGroup(
@@ -281,7 +299,8 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 	// access/migrate hanya relevan bila db∈{postgres,mysql} (resolver menegakkan;
 	// di sini diisi default agar konsisten dengan jalur flag — byte-identical §5.2).
 	if a.DB == answers.DBPostgres || a.DB == answers.DBMySQL {
-		a.Access = answers.AccessSQLx
+		// access dipilih user di grup q_access (default sqlx bila tak disentuh).
+		a.Access = answers.Access(access)
 		a.Migrate = answers.MigrateGolangMigrate
 		// docker default true bila db≠none (SPEC §5.1) — hanya bila user belum
 		// secara eksplisit mematikannya; di multiselect, ketiadaan = false, jadi

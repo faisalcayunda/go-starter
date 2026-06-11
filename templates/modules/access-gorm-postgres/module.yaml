@@ -1,0 +1,68 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul access-gorm-postgres: lapisan akses GORM untuk PostgreSQL. AKTIF hanya
+# bila db=postgres DAN access=gorm (module-level gating di resolver). MENGGANTIKAN
+# file koneksi pgxpool milik db-postgres (yang di-gate `ne .Access "gorm"`) sehingga
+# TEPAT SATU mekanisme akses ter-emit (tak ada double-wiring koneksi DB).
+#
+# Pola IDENTIK dengan db-postgres untuk wiring main (AUTO-WIRE region:imports/wiring):
+# menyumbang import paket database + wiring database.Connect(ctx)/AutoMigrate/Close ke
+# main. Skeleton koneksi GORM + contoh model (HealthCheck) + repository sederhana
+# di internal/platform/database. Dep go.mod: gorm.io/gorm + gorm.io/driver/postgres
+# (driver postgres menarik pgx transitif via go mod tidy — TIDAK didaftarkan di sini
+# agar go.mod jujur: hanya yang benar-benar di-import skeleton).
+name: access-gorm-postgres
+description: >-
+  Lapisan akses GORM untuk PostgreSQL (gorm.io/gorm + gorm.io/driver/postgres):
+  skeleton koneksi dari env DSN, contoh model + AutoMigrate, dan repository GORM
+  sederhana. Menggantikan koneksi pgxpool db-postgres saat access=gorm; wiring
+  Connect/AutoMigrate/Close ter-AUTO-WIRE ke main.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}. Tanpa `when`:
+# modul ini hanya aktif saat resolver memilihnya (access=gorm ∧ db=postgres),
+# sehingga seluruh file-nya relevan tanpa gating tambahan.
+files:
+  - template: database/gorm.go.tmpl
+    target:   internal/platform/database/gorm.go
+    mode:     render
+  - template: database/repository.go.tmpl
+    target:   internal/platform/database/repository.go
+    mode:     render
+
+# Dependency go.mod dialirkan via gomod: (dirakit modfile.Format, ADR-002 §6).
+# gorm core + driver postgres — keduanya BENAR-BENAR di-import skeleton
+# (gorm.go: gorm.Open + postgres.Open). Versi terverifikasi pkg.go.dev 2026-06-06:
+# gorm v1.31.1 (Nov 2025), driver/postgres v1.6.0 (May 2025) — keduanya maintained.
+gomod:
+  - path:    gorm.io/gorm
+    version: v1.31.1
+  - path:    gorm.io/driver/postgres
+    version: v1.6.0
+
+# core menyediakan anchor region:imports + region:wiring di main. Modul ini
+# menyisip ke sana (analog db-postgres).
+requires:
+  - core
+
+# Mutual exclusive: akses GORM untuk driver lain. db-postgres TETAP aktif (ia
+# menyumbang env/compose/migrate); hanya file koneksi pgxpool-nya yang di-gate off.
+conflicts:
+  - access-gorm-mysql
+
+# Kontribusi merge: AUTO-WIRE import paket database + wiring Connect/AutoMigrate ke
+# main (anchor region:imports / region:wiring). Order 25 (> 20 db-postgres) — tak
+# pernah bentrok karena koneksi pgxpool db-postgres di-gate off saat access=gorm.
+contributes:
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   imports
+    fragment: fragments/main.imports.gorm.tmpl
+    order:    25
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   wiring
+    fragment: fragments/main.wiring.gorm.tmpl
+    order:    25
+
+# Vars default selaras db-postgres (DSN env). DBPort/DBName/DBUser dipakai gorm.go.
+vars:
+  DBPort: 5432
+  DBName: app
+  DBUser: app

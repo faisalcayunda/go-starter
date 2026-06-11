@@ -1,0 +1,11 @@
+	// region:wiring (access-gorm-postgres) — buka koneksi GORM (PostgreSQL) dari env DSN.
+	db, err := database.Connect(ctx)
+	if err != nil {
+		logger.Error("connect postgres (gorm)", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = database.Close(db) }()
+	if err := database.AutoMigrate(db); err != nil {
+		logger.Error("auto-migrate postgres (gorm)", "error", err)
+		os.Exit(1)
+	}

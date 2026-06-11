@@ -1,0 +1,96 @@
+// Package database menyediakan koneksi MySQL via GORM (gorm.io/gorm +
+// gorm.io/driver/mysql). DSN dibangun dari environment (DATABASE_URL atau
+// komponen DB_*). *gorm.DB dipakai lapisan akses query (lihat HealthCheckRepository).
+package database
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"time"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+)
+
+// HealthCheck adalah contoh model GORM yang dipetakan ke tabel health_checks.
+// GORM menurunkan nama tabel dari nama struct (snake_case + jamak) — sesuaikan
+// dengan kebutuhan domain. autoCreateTime mengisi CheckedAt saat Create.
+type HealthCheck struct {
+	ID        uint      `gorm:"primaryKey"`
+	CheckedAt time.Time `gorm:"not null;autoCreateTime"`
+}
+
+// Connect membuka koneksi MySQL via GORM dan memverifikasinya dengan Ping.
+// DSN diambil dari env DATABASE_URL bila ada; selain itu dirakit dari DB_HOST,
+// DB_PORT, DB_USER, DB_PASSWORD, DB_NAME. Pemanggil bertanggung jawab menutup
+// koneksi via Close(db) saat shutdown.
+func Connect(ctx context.Context) (*gorm.DB, error) {
+	db, err := gorm.Open(mysql.Open(dsn()), &gorm.Config{})
+	if err != nil {
+		return nil, fmt.Errorf("mysql: open gorm: %w", err)
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		return nil, fmt.Errorf("mysql: get sql.DB: %w", err)
+	}
+
+	// Batas pool wajar untuk skeleton; sesuaikan dengan beban produksi.
+	sqlDB.SetMaxOpenConns(25)
+	sqlDB.SetMaxIdleConns(25)
+	sqlDB.SetConnMaxLifetime(5 * time.Minute)
+
+	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := sqlDB.PingContext(pingCtx); err != nil {
+		_ = sqlDB.Close()
+		return nil, fmt.Errorf("mysql: ping: %w", err)
+	}
+	return db, nil
+}
+
+// AutoMigrate menerapkan skema model GORM ke database (contoh: HealthCheck).
+// Dipanggil saat startup sebagai alternatif/komplemen migrasi golang-migrate.
+// Untuk skema produksi yang dikontrol versi, lebih disukai golang-migrate.
+func AutoMigrate(db *gorm.DB) error {
+	if err := db.AutoMigrate(&HealthCheck{}); err != nil {
+		return fmt.Errorf("mysql: auto-migrate: %w", err)
+	}
+	return nil
+}
+
+// Close menutup koneksi pool di balik *gorm.DB.
+func Close(db *gorm.DB) error {
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
+}
+
+// dsn mengembalikan connection string MySQL (format go-sql-driver/mysql).
+// DATABASE_URL diutamakan; bila kosong, DSN dirakit dari komponen DB_*
+// (default sesuai .env.example). parseTime=true agar kolom DATE/DATETIME
+// dipetakan ke time.Time.
+func dsn() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
+	}
+	return fmt.Sprintf(
+		"%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&loc=UTC",
+		envOr("DB_USER", "{{ .DBUser }}"),
+		envOr("DB_PASSWORD", "mysql"),
+		envOr("DB_HOST", "localhost"),
+		envOr("DB_PORT", "{{ .DBPort }}"),
+		envOr("DB_NAME", "{{ .DBName }}"),
+	)
+}
+
+// envOr mengembalikan nilai env key bila ada & non-kosong, selain itu fallback.
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}

@@ -210,7 +210,9 @@ func mvpRegistry() *fakeRegistry {
 			Name:        modDBPostgres,
 			Description: "postgres pgxpool + migrations + wiring main",
 			Files: []module.FileSpec{
-				{Template: "database/postgres.go.tmpl", Target: "internal/platform/database/postgres.go", Mode: "render"},
+				// Koneksi pgxpool DI-GATE `ne .Access "gorm"` (selaras manifest nyata):
+				// saat access=gorm digantikan gorm.go milik access-gorm-postgres.
+				{Template: "database/postgres.go.tmpl", Target: "internal/platform/database/postgres.go", Mode: "render", When: "ne .Access \"gorm\""},
 				{Template: "migrations/0001_init.up.sql.tmpl", Target: "migrations/0001_init.up.sql", Mode: "copy", When: "ne .Migrate \"\""},
 				{Template: "migrations/0001_init.down.sql.tmpl", Target: "migrations/0001_init.down.sql", Mode: "copy", When: "ne .Migrate \"\""},
 			},
@@ -223,9 +225,9 @@ func mvpRegistry() *fakeRegistry {
 			Contributes: []module.MergeContribution{
 				{Target: "docker-compose.yml", Anchor: "services", Fragment: "fragments/compose.postgres.service.yml.tmpl", Order: 20, When: ".Docker"},
 				{Target: ".env.example", Anchor: "database", Fragment: "fragments/env.postgres.tmpl", Order: 20, When: ".EnvExample"},
-				// AUTO-WIRE: import paket database + wiring database.Connect(ctx) ke main.
-				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.postgres.tmpl", Order: 20},
-				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.postgres.tmpl", Order: 20},
+				// AUTO-WIRE pgxpool DI-GATE `ne .Access "gorm"` (selaras manifest nyata).
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.postgres.tmpl", Order: 20, When: "ne .Access \"gorm\""},
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.postgres.tmpl", Order: 20, When: "ne .Access \"gorm\""},
 			},
 			Vars: map[string]any{"DBPort": 5432, "DBImage": "postgres:17-alpine"},
 		},
@@ -240,7 +242,8 @@ func mvpRegistry() *fakeRegistry {
 			Name:        modDBMySQL,
 			Description: "mysql go-sql-driver + migrations + wiring main",
 			Files: []module.FileSpec{
-				{Template: "database/mysql.go.tmpl", Target: "internal/platform/database/mysql.go", Mode: "render"},
+				// Koneksi database/sql DI-GATE `ne .Access "gorm"` (selaras manifest nyata).
+				{Template: "database/mysql.go.tmpl", Target: "internal/platform/database/mysql.go", Mode: "render", When: "ne .Access \"gorm\""},
 				{Template: "migrations/0001_init.up.sql.tmpl", Target: "migrations/0001_init.up.sql", Mode: "copy", When: "ne .Migrate \"\""},
 				{Template: "migrations/0001_init.down.sql.tmpl", Target: "migrations/0001_init.down.sql", Mode: "copy", When: "ne .Migrate \"\""},
 			},
@@ -253,11 +256,57 @@ func mvpRegistry() *fakeRegistry {
 			Contributes: []module.MergeContribution{
 				{Target: "docker-compose.yml", Anchor: "services", Fragment: "fragments/compose.mysql.service.yml.tmpl", Order: 20, When: ".Docker"},
 				{Target: ".env.example", Anchor: "database", Fragment: "fragments/env.mysql.tmpl", Order: 20, When: ".EnvExample"},
-				// AUTO-WIRE: import paket database + wiring database.Connect(ctx) ke main.
-				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.mysql.tmpl", Order: 20},
-				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.mysql.tmpl", Order: 20},
+				// AUTO-WIRE database/sql DI-GATE `ne .Access "gorm"` (selaras manifest nyata).
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.mysql.tmpl", Order: 20, When: "ne .Access \"gorm\""},
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.mysql.tmpl", Order: 20, When: "ne .Access \"gorm\""},
 			},
 			Vars: map[string]any{"DBPort": 3306, "DBImage": "mysql:8.4"},
+		},
+		// access-gorm-postgres: lapisan akses GORM untuk PostgreSQL. AKTIF bila
+		// access=gorm ∧ db=postgres. Menggantikan koneksi pgxpool db-postgres (di-gate
+		// off) → koneksi GORM gorm.go + repository.go + AUTO-WIRE main. Fixture
+		// MENCERMINKAN manifest nyata: gomod WAJIB EKSAK (gorm v1.31.1 + driver/postgres
+		// v1.6.0, terverifikasi pkg.go.dev 2026-06-06), 2 file render, 2 contributes
+		// AUTO-WIRE (imports/wiring order 25). requires core; conflicts access-gorm-mysql.
+		modAccessGormPostgres: {
+			Name:        modAccessGormPostgres,
+			Description: "access GORM postgres (gorm.io/gorm + driver/postgres) + wiring main",
+			Files: []module.FileSpec{
+				{Template: "database/gorm.go.tmpl", Target: "internal/platform/database/gorm.go", Mode: "render"},
+				{Template: "database/repository.go.tmpl", Target: "internal/platform/database/repository.go", Mode: "render"},
+			},
+			GoMod: []module.ModuleDep{
+				{Path: "gorm.io/gorm", Version: "v1.31.1"},
+				{Path: "gorm.io/driver/postgres", Version: "v1.6.0"},
+			},
+			Requires:  []string{modCore},
+			Conflicts: []string{modAccessGormMySQL},
+			Contributes: []module.MergeContribution{
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.gorm.tmpl", Order: 25},
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.gorm.tmpl", Order: 25},
+			},
+			Vars: map[string]any{"DBPort": 5432, "DBName": "app", "DBUser": "app"},
+		},
+		// access-gorm-mysql: analog access-gorm-postgres untuk MySQL (driver/mysql).
+		// gomod WAJIB EKSAK (gorm v1.31.1 + driver/mysql v1.6.0).
+		modAccessGormMySQL: {
+			Name:        modAccessGormMySQL,
+			Description: "access GORM mysql (gorm.io/gorm + driver/mysql) + wiring main",
+			Files: []module.FileSpec{
+				{Template: "database/gorm.go.tmpl", Target: "internal/platform/database/gorm.go", Mode: "render"},
+				{Template: "database/repository.go.tmpl", Target: "internal/platform/database/repository.go", Mode: "render"},
+			},
+			GoMod: []module.ModuleDep{
+				{Path: "gorm.io/gorm", Version: "v1.31.1"},
+				{Path: "gorm.io/driver/mysql", Version: "v1.6.0"},
+			},
+			Requires:  []string{modCore},
+			Conflicts: []string{modAccessGormPostgres},
+			Contributes: []module.MergeContribution{
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.gorm.tmpl", Order: 25},
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.gorm.tmpl", Order: 25},
+			},
+			Vars: map[string]any{"DBPort": 3306, "DBName": "app", "DBUser": "app"},
 		},
 		// addon-ci: emit .github/workflows/ci.yml ATAU .gitlab-ci.yml tergantung
 		// provider, masing-masing di-gate via `when` eq .CI "...". Hanya satu yang
@@ -532,6 +581,111 @@ func TestResolve_MonolithNetHTTP_Postgres(t *testing.T) {
 				t.Errorf("Vars DBImage tidak ter-merge ke Data: %v", m["DBImage"])
 			}
 		}
+	}
+}
+
+// TestResolve_Postgres_AccessGORM memverifikasi jalur access=gorm + db=postgres:
+//   - dep gorm + driver/postgres ada (versi benar); pgx (pgxpool langsung) TIDAK
+//     ikut karena koneksi pgxpool db-postgres di-gate off (driver postgres GORM
+//     menarik pgx transitif via go mod tidy, bukan deklarasi langsung);
+//   - file koneksi GORM (gorm.go + repository.go) ter-emit;
+//   - file koneksi pgxpool (internal/platform/database/postgres.go) TIDAK ter-emit;
+//   - wiring main memakai fragmen GORM, bukan fragmen pgxpool (tepat satu koneksi).
+func TestResolve_Postgres_AccessGORM(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessGORM
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve gagal: %v", err)
+	}
+
+	// Deps: gorm + driver/postgres (versi terverifikasi). pgxpool langsung TIDAK ada.
+	if !hasDep(p.Deps, "gorm.io/gorm") {
+		t.Errorf("gorm.io/gorm harus ada saat access=gorm: %+v", p.Deps)
+	}
+	for _, d := range p.Deps {
+		if d.Path == "gorm.io/gorm" && d.Version != "v1.31.1" {
+			t.Errorf("gorm.io/gorm versi salah: %q (mau v1.31.1)", d.Version)
+		}
+		if d.Path == "gorm.io/driver/postgres" && d.Version != "v1.6.0" {
+			t.Errorf("driver/postgres versi salah: %q (mau v1.6.0)", d.Version)
+		}
+	}
+	if !hasDep(p.Deps, "gorm.io/driver/postgres") {
+		t.Errorf("gorm.io/driver/postgres harus ada saat access=gorm+postgres: %+v", p.Deps)
+	}
+	// Catatan honest-go.mod: pgx/v5 TETAP dideklarasikan db-postgres (gomod tak bisa
+	// di-gate per-FileSpec). Saat access=gorm koneksi pgxpool tak di-emit, namun
+	// gorm.io/driver/postgres sendiri MEM-BUTUH pgx/v5 (direct dep di go.mod-nya) →
+	// `go mod tidy` mendemosikannya ke `// indirect`, BUKAN menghapus. go.mod tetap
+	// jujur pasca-tidy & build hijau. Jadi pgx boleh hadir di plan.Deps (pre-tidy).
+
+	// File koneksi GORM ter-emit; koneksi pgxpool TIDAK.
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/gorm.go"); !ok {
+		t.Errorf("gorm.go harus ter-emit saat access=gorm")
+	}
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/repository.go"); !ok {
+		t.Errorf("repository.go (GORM) harus ter-emit saat access=gorm")
+	}
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/postgres.go"); ok {
+		t.Errorf("postgres.go (pgxpool) TIDAK boleh ter-emit saat access=gorm (double-wiring koneksi)")
+	}
+
+	// Wiring main: fragmen GORM hadir, fragmen pgxpool TIDAK.
+	main, ok := fileOpByTarget(p.Files, "cmd/shop/main.go")
+	if !ok {
+		t.Fatalf("cmd/shop/main.go tidak ada di plan")
+	}
+	var hasGormWiring, hasPgxWiring bool
+	for _, fr := range main.Fragments {
+		if strings.Contains(fr.Content, "main.wiring.gorm") || strings.Contains(fr.Content, "main.imports.gorm") {
+			hasGormWiring = true
+		}
+		if strings.Contains(fr.Content, "main.wiring.postgres") || strings.Contains(fr.Content, "main.imports.postgres") {
+			hasPgxWiring = true
+		}
+	}
+	if !hasGormWiring {
+		t.Errorf("wiring GORM harus ter-AUTO-WIRE ke main saat access=gorm, fragments: %+v", main.Fragments)
+	}
+	if hasPgxWiring {
+		t.Errorf("wiring pgxpool TIDAK boleh ter-emit saat access=gorm (digate off), fragments: %+v", main.Fragments)
+	}
+}
+
+// TestResolve_MySQL_AccessGORM memverifikasi jalur access=gorm + db=mysql (analog
+// postgres): dep gorm + driver/mysql ada, koneksi GORM ter-emit, koneksi
+// database/sql db-mysql + wiringnya TIDAK ikut.
+func TestResolve_MySQL_AccessGORM(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBMySQL
+	a.Access = answers.AccessGORM
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve gagal: %v", err)
+	}
+
+	if !hasDep(p.Deps, "gorm.io/gorm") || !hasDep(p.Deps, "gorm.io/driver/mysql") {
+		t.Errorf("gorm + driver/mysql harus ada saat access=gorm+mysql: %+v", p.Deps)
+	}
+	for _, d := range p.Deps {
+		if d.Path == "gorm.io/driver/mysql" && d.Version != "v1.6.0" {
+			t.Errorf("driver/mysql versi salah: %q (mau v1.6.0)", d.Version)
+		}
+	}
+	// Honest-go.mod: go-sql-driver/mysql TETAP dideklarasikan db-mysql (gomod tak
+	// di-gate), tetapi gorm.io/driver/mysql mem-butuh-nya → `go mod tidy` mendemosikan
+	// ke `// indirect`. Build hijau. (Sama dengan kasus pgx di postgres.)
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/gorm.go"); !ok {
+		t.Errorf("gorm.go harus ter-emit saat access=gorm+mysql")
+	}
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/mysql.go"); ok {
+		t.Errorf("mysql.go (database/sql) TIDAK boleh ter-emit saat access=gorm")
 	}
 }
 
@@ -1556,9 +1710,11 @@ var fakeModulesUnderGuard = map[string]driftSpec{
 		filesNote:   "db-mysql: idem db-postgres.",
 		contribNote: "db-mysql: idem db-postgres.",
 	},
-	modAddonObs:    {files: cmpExact, contributes: cmpExact},
-	modAddonCI:     {files: cmpExact, contributes: cmpExact},
-	modAddonDocker: {files: cmpExact, contributes: cmpExact},
+	modAccessGormPostgres: {files: cmpExact, contributes: cmpExact},
+	modAccessGormMySQL:    {files: cmpExact, contributes: cmpExact},
+	modAddonObs:           {files: cmpExact, contributes: cmpExact},
+	modAddonCI:            {files: cmpExact, contributes: cmpExact},
+	modAddonDocker:        {files: cmpExact, contributes: cmpExact},
 	modAddonMake: {
 		files:       cmpExact,
 		contributes: cmpSubset,

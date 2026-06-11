@@ -114,7 +114,7 @@ func newCreateCmd() *cobra.Command {
 	fl.BoolVar(&f.noGateway, "no-gateway", false, "nonaktifkan gateway (default; menang atas --gateway)")
 	fl.StringVar(&f.http, "http", string(answers.HTTPNetHTTP), "HTTP framework: net/http|chi|echo")
 	fl.StringVar(&f.db, "db", string(answers.DBNone), "database: none|postgres|mysql")
-	fl.StringVar(&f.access, "access", "", "lapisan akses query (Fase 4a: sqlx; butuh --db≠none, C2)")
+	fl.StringVar(&f.access, "access", "", "lapisan akses query: sqlx|database/sql|gorm (butuh --db∈{postgres,mysql}, C2)")
 	fl.StringVar(&f.migrate, "migrate", "", "tool migrasi (Fase 4a: golang-migrate; butuh --db∉{none}, C1)")
 	fl.StringVar(&f.ci, "ci", "", "provider CI bila addon 'ci' aktif: github-actions|gitlab-ci (default github-actions)")
 	fl.StringSliceVar(&f.addons, "addons", nil, "add-ons csv: docker,makefile,golangci,env,ci,observability")

@@ -51,6 +51,9 @@ func TestValidate_HappyPaths(t *testing.T) {
 			a.Migrate = MigrateGolangMigrate
 			return a
 		}()},
+		{"db postgres access gorm", func() Answers { a := validMonolith(); a.DB = DBPostgres; a.Access = AccessGORM; return a }()},
+		{"db mysql access gorm", func() Answers { a := validMonolith(); a.DB = DBMySQL; a.Access = AccessGORM; return a }()},
+		{"db postgres access database/sql", func() Answers { a := validMonolith(); a.DB = DBPostgres; a.Access = AccessDatabaseSQL; return a }()},
 		{"ci github-actions", func() Answers { a := validMonolith(); a.CI = CIGitHubActions; return a }()},
 		{"ci gitlab-ci", func() Answers { a := validMonolith(); a.CI = CIGitLabCI; return a }()},
 		{"ci none eksplisit", func() Answers { a := validMonolith(); a.CI = CINone; return a }()},
@@ -163,7 +166,8 @@ func TestValidate_UnsupportedOptions(t *testing.T) {
 		{"db sqlite belum didukung", func(a *Answers) { a.DB = DBSQLite }, []string{"sqlite", "belum didukung"}},
 		{"db mongo belum didukung", func(a *Answers) { a.DB = DBMongo }, []string{"mongo", "belum didukung"}},
 		{"db tak dikenal", func(a *Answers) { a.DB = "cockroach" }, []string{"cockroach", "postgres"}},
-		{"access gorm belum didukung", func(a *Answers) { a.DB = DBPostgres; a.Access = AccessGORM }, []string{"gorm", "belum didukung"}},
+		{"access sqlc belum didukung", func(a *Answers) { a.DB = DBPostgres; a.Access = AccessSQLC }, []string{"sqlc", "belum didukung"}},
+		{"access ent belum didukung", func(a *Answers) { a.DB = DBPostgres; a.Access = AccessEnt }, []string{"ent", "belum didukung"}},
 		{"access tak dikenal", func(a *Answers) { a.DB = DBPostgres; a.Access = "xorm" }, []string{"xorm", "sqlx"}},
 		{"migrate goose belum didukung", func(a *Answers) { a.DB = DBPostgres; a.Migrate = MigrateGoose }, []string{"goose", "belum didukung"}},
 		{"migrate tak dikenal", func(a *Answers) { a.DB = DBPostgres; a.Migrate = "flyway" }, []string{"flyway", "golang-migrate"}},

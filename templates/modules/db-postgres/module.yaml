@@ -14,9 +14,14 @@ description: >-
 # files[] skema FileSpec kanonik {template, target, mode, when}.
 # Migrasi .sql disalin apa adanya (mode copy) — bukan Go, tak perlu render/gofmt.
 files:
+  # Koneksi pgxpool default. DI-GATE `ne .Access "gorm"`: bila access=gorm, file
+  # koneksi ini TIDAK di-emit (digantikan internal/platform/database/gorm.go milik
+  # access-gorm-postgres) sehingga TEPAT SATU mekanisme akses ter-emit (tak ada
+  # double koneksi DB di internal/platform/database).
   - template: database/postgres.go.tmpl
     target:   internal/platform/database/postgres.go
     mode:     render
+    when:     "ne .Access \"gorm\""
   - template: migrations/0001_init.up.sql.tmpl
     target:   migrations/0001_init.up.sql
     mode:     copy
@@ -75,14 +80,18 @@ contributes:
   # db=postgres. Pool dibuka & defer pool.Close() — pustaka koneksi siap-pakai
   # ter-wire otomatis (bukan sekadar library-only). go build hijau (Connect hanya
   # konek/ping di RUNTIME, bukan saat build). order 20 selaras kontribusi lain.
+  # AUTO-WIRE pgxpool DI-GATE `ne .Access "gorm"`: saat access=gorm, wiring koneksi
+  # pgxpool diganti wiring GORM milik access-gorm-postgres (region:imports/wiring).
   - target:   cmd/{{ modBase .ModulePath }}/main.go
     anchor:   imports
     fragment: fragments/main.imports.postgres.tmpl
     order:    20
+    when:     "ne .Access \"gorm\""
   - target:   cmd/{{ modBase .ModulePath }}/main.go
     anchor:   wiring
     fragment: fragments/main.wiring.postgres.tmpl
     order:    20
+    when:     "ne .Access \"gorm\""
   # Target migrate hanya disisip bila Makefile aktif (skeleton dimiliki core,
   # gated .Makefile) DAN tool migrasi terpilih. Tanpa gate .Makefile, kontribusi
   # ini menjadi target merge yatim (skeleton Makefile tak diproduksi) → fail-fast.

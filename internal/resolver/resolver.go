@@ -107,6 +107,13 @@ const (
 	modDBPostgres = "db-postgres"
 	modDBMySQL    = "db-mysql"
 
+	// access-gorm-* : lapisan akses GORM. Aktif HANYA bila access=gorm, dipasangkan
+	// dengan driver DB terpilih (postgres/mysql). Mengganti koneksi sqlx/pgxpool/
+	// database-sql milik db-* (yang di-gate `ne .Access "gorm"`) → tepat satu
+	// mekanisme akses ter-emit (hindari double-wiring koneksi DB).
+	modAccessGormPostgres = "access-gorm-postgres"
+	modAccessGormMySQL    = "access-gorm-mysql"
+
 	modAddonDocker = "addon-docker"
 	modAddonMake   = "addon-makefile"
 	modAddonLint   = "addon-golangci"
@@ -341,6 +348,22 @@ func (r *resolver) activeModules(a answers.Answers) ([]module.Manifest, error) {
 		names = append(names, modDBPostgres)
 	case answers.DBMySQL:
 		names = append(names, modDBMySQL)
+	}
+
+	// Lapisan akses GORM: bila access=gorm (hanya valid db∈{postgres,mysql} —
+	// ditegakkan answers.Validate), aktifkan modul access-gorm-<driver> yang
+	// MENGGANTIKAN koneksi sqlx/pgxpool/database-sql db-* (di-gate `ne .Access
+	// "gorm"`). db-* TETAP aktif (menyumbang env/compose/migrate); hanya file +
+	// wiring koneksinya yang di-gate off → tepat satu koneksi DB ter-emit. sqlx &
+	// database-sql tidak mengaktifkan modul tambahan (koneksi default db-* sudah
+	// memakai sqlx/database-sql).
+	if a.Access == answers.AccessGORM {
+		switch a.DB {
+		case answers.DBPostgres:
+			names = append(names, modAccessGormPostgres)
+		case answers.DBMySQL:
+			names = append(names, modAccessGormMySQL)
+		}
 	}
 
 	// Add-on per Answers.

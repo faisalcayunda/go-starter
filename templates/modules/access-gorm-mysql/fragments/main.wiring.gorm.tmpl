@@ -1,0 +1,11 @@
+	// region:wiring (access-gorm-mysql) — buka koneksi GORM (MySQL) dari env DSN.
+	db, err := database.Connect(ctx)
+	if err != nil {
+		logger.Error("connect mysql (gorm)", "error", err)
+		os.Exit(1)
+	}
+	defer func() { _ = database.Close(db) }()
+	if err := database.AutoMigrate(db); err != nil {
+		logger.Error("auto-migrate mysql (gorm)", "error", err)
+		os.Exit(1)
+	}

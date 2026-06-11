@@ -351,12 +351,14 @@ func (a Answers) Validate() error {
 		//    tunggal yang diimplementasi). Nilai kosong dibiarkan (resolver default).
 		if a.DB == DBPostgres || a.DB == DBMySQL {
 			switch a.Access {
-			case "", AccessSQLx:
-				// ok (kosong → resolver default ke sqlx)
-			case AccessDatabaseSQL, AccessSQLC, AccessGORM, AccessEnt:
-				return fmt.Errorf("access layer %q belum didukung di MVP (Fase 3 hanya 'sqlx'); akan hadir di fase berikutnya", a.Access)
+			case "", AccessSQLx, AccessDatabaseSQL, AccessGORM:
+				// ok. Kosong → resolver default ke sqlx. sqlx & database/sql memakai
+				// koneksi default db-*; gorm mengaktifkan modul access-gorm-<driver>
+				// (valid HANYA db∈{postgres,mysql} — sudah dijamin cabang ini).
+			case AccessSQLC, AccessEnt:
+				return fmt.Errorf("access layer %q belum didukung di MVP (didukung: 'sqlx', 'database/sql', 'gorm'); 'sqlc'/'ent' akan hadir di fase berikutnya", a.Access)
 			default:
-				return fmt.Errorf("access layer %q tidak dikenal: pilih 'sqlx'", a.Access)
+				return fmt.Errorf("access layer %q tidak dikenal: pilih 'sqlx', 'database/sql', atau 'gorm'", a.Access)
 			}
 			switch a.Migrate {
 			case "", MigrateGolangMigrate:

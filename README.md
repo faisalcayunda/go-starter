@@ -210,7 +210,7 @@ gostarter add service payment --dry-run
 | `--kind` | `rest` | `rest` | Jenis aplikasi. |
 | `--http` | `net/http` \| `chi` \| `echo` | `net/http` | Framework HTTP (monolith / modular-monolith). |
 | `--db` | `none` \| `postgres` \| `mysql` | `none` | Database. |
-| `--access` | `sqlx` | — | Lapisan akses query (butuh `--db≠none`). |
+| `--access` | `sqlx` \| `database/sql` \| `gorm` | `sqlx` | Lapisan akses query (butuh `--db∈{postgres,mysql}`). `gorm` mengaktifkan koneksi `gorm.io/gorm` + driver (`gorm.io/driver/postgres` atau `gorm.io/driver/mysql`) plus contoh model + `AutoMigrate` + repository, menggantikan koneksi pgxpool/`database/sql` default. |
 | `--migrate` | `golang-migrate` | — | Tool migrasi (butuh `--db≠none`). |
 | `--addons` | `docker,makefile,golangci,env,ci,observability` (csv) | — | Add-on yang diaktifkan. |
 | `--feature` | (sama seperti `--addons`) | — | Add-on tambahan, digabung union dengan `--addons`. |

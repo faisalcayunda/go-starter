@@ -124,6 +124,22 @@ func goldenCases() []goldenCase {
 			},
 		},
 		{
+			// monolith / net-http / db=postgres / access=gorm
+			// → jalur akses GORM: koneksi gorm.go + repository.go MENGGANTIKAN
+			// pgxpool postgres.go (di-gate off); wiring GORM ter-AUTO-WIRE ke main.
+			// Membuktikan tepat satu mekanisme akses ter-emit + dep gorm+driver.
+			dir: "monolith-nethttp-postgres-gorm",
+			answers: answers.Answers{
+				Name:   "demo-gorm",
+				Module: "github.com/example/demo-gorm",
+				Arch:   answers.ArchMonolith,
+				Kind:   answers.KindREST,
+				HTTP:   answers.HTTPNetHTTP,
+				DB:     answers.DBPostgres,
+				Access: answers.AccessGORM,
+			},
+		},
+		{
 			dir: "microservice-svc-a-svc-b-grpc",
 			answers: answers.Answers{
 				Name:     "demo-ms",
