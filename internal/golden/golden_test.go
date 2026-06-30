@@ -149,6 +149,108 @@ func goldenCases() []goldenCase {
 				Comm:     answers.CommGRPC,
 			},
 		},
+		{
+			// monolith / net-http / db=postgres / access=gorm / addons=[strapgorm,makefile]
+			// → add-on strapgorm (Strapi-style query builder di atas GORM): domain
+			// contoh Product (model + repository GORM via strapgorm + handler GET
+			// /api/products) yang me-REUSE *gorm.DB milik access-gorm-postgres (TANPA
+			// pool kedua). Membuktikan: go.mod me-require strapgorm @ pseudo-version
+			// pin + go directive 1.25; internal/product/** ter-emit; wiring main
+			// (region:imports/wiring) & server.go (region:imports/routes) ter-AUTO-WIRE
+			// memakai var `db` access-gorm yang sama (single pool). Makefile ikut untuk
+			// menutup jalur merge addon di atas kombinasi strapgorm.
+			dir: "monolith-nethttp-postgres-gorm-strapgorm-makefile",
+			answers: answers.Answers{
+				Name:      "shopdemo",
+				Module:    "example.com/shopdemo",
+				Arch:      answers.ArchMonolith,
+				Kind:      answers.KindREST,
+				HTTP:      answers.HTTPNetHTTP,
+				DB:        answers.DBPostgres,
+				Access:    answers.AccessGORM,
+				Strapgorm: true,
+				Makefile:  true,
+			},
+		},
+		{
+			// monolith / chi / db=postgres / access=gorm / addons=[strapgorm,makefile]
+			// → strapgorm DI ATAS router chi: constraint strapgorm (arch=monolith +
+			// access=gorm + db∈{postgres,mysql}) TIDAK membatasi HTTP framework, jadi
+			// kombinasi ini valid. Membuktikan pendaftaran rute FRAMEWORK-AWARE: anchor
+			// region:routes httpserver.New profil chi memakai variabel router `r` yang
+			// in-scope (r.Get("/api/products", product.ListHandler())) — BUKAN `mux`.
+			// Mencegah regresi "undefined: mux" pada router non-net/http.
+			dir: "monolith-chi-postgres-gorm-strapgorm-makefile",
+			answers: answers.Answers{
+				Name:      "shopdemo",
+				Module:    "example.com/shopdemo",
+				Arch:      answers.ArchMonolith,
+				Kind:      answers.KindREST,
+				HTTP:      answers.HTTPChi,
+				DB:        answers.DBPostgres,
+				Access:    answers.AccessGORM,
+				Strapgorm: true,
+				Makefile:  true,
+			},
+		},
+		{
+			// monolith / echo / db=postgres / access=gorm / addons=[strapgorm,makefile]
+			// → strapgorm DI ATAS router echo. Profil echo memakai variabel router `e`
+			// dan TIDAK punya `mux` di scope region:routes — fragmen rute FRAMEWORK-AWARE
+			// mendaftarkan via e.GET("/api/products", echo.WrapHandler(product.ListHandler())).
+			// Kombinasi inilah yang dahulu GAGAL kompilasi ("undefined: mux") sebelum
+			// fragmen rute di-gate per HTTP; golden ini mengunci perbaikannya.
+			dir: "monolith-echo-postgres-gorm-strapgorm-makefile",
+			answers: answers.Answers{
+				Name:      "shopdemo",
+				Module:    "example.com/shopdemo",
+				Arch:      answers.ArchMonolith,
+				Kind:      answers.KindREST,
+				HTTP:      answers.HTTPEcho,
+				DB:        answers.DBPostgres,
+				Access:    answers.AccessGORM,
+				Strapgorm: true,
+				Makefile:  true,
+			},
+		},
+		{
+			// modular-monolith / net-http / db=postgres / access=gorm / strapgorm
+			// → Product = domain modular kelas-satu internal/modules/product/**
+			// (facade product.go + internal/core berduri). Di-inject *gorm.DB
+			// access=gorm lewat composition root cmd/<app>/main.go; productMod
+			// disisipkan ke httpserver.New via anchor region:modules. Mengunci
+			// wiring modular (imports/wiring/modules) + go directive 1.25.
+			dir: "modular-nethttp-postgres-gorm-strapgorm",
+			answers: answers.Answers{
+				Name:      "shopmod",
+				Module:    "example.com/shopmod",
+				Arch:      answers.ArchModularMonolith,
+				Kind:      answers.KindREST,
+				HTTP:      answers.HTTPNetHTTP,
+				DB:        answers.DBPostgres,
+				Access:    answers.AccessGORM,
+				Strapgorm: true,
+			},
+		},
+		{
+			// microservice / svc-a+svc-b / db=postgres / access=gorm / strapgorm
+			// → service product MANDIRI (gRPC Ping + HTTP /api/products via strapgorm)
+			// dgn koneksi GORM sendiri. proto/product + services/product/** ter-emit;
+			// docker-compose menambah service product + postgres + volume. go.mod
+			// jujur (gorm + strapgorm + driver/postgres saja). gen/ DIKECUALIKAN
+			// (di-emit hook buf, bukan render). go directive 1.25.
+			dir: "microservice-svc-a-svc-b-postgres-gorm-strapgorm",
+			answers: answers.Answers{
+				Name:      "shopms",
+				Module:    "example.com/shopms",
+				Arch:      answers.ArchMicroservice,
+				Services:  []answers.Service{{Name: "svc-a"}, {Name: "svc-b"}},
+				Comm:      answers.CommGRPC,
+				DB:        answers.DBPostgres,
+				Access:    answers.AccessGORM,
+				Strapgorm: true,
+			},
+		},
 	}
 }
 
@@ -160,7 +262,6 @@ func TestGolden(t *testing.T) {
 	res := resolver.New(reg)
 
 	for _, gc := range goldenCases() {
-		gc := gc
 		t.Run(gc.dir, func(t *testing.T) {
 			t.Parallel()
 
@@ -357,10 +458,7 @@ func compareSnapshots(t *testing.T, combo string, want, got map[string]string) {
 func lineDiff(want, got string) string {
 	wl := strings.Split(want, "\n")
 	gl := strings.Split(got, "\n")
-	n := len(wl)
-	if len(gl) < n {
-		n = len(gl)
-	}
+	n := min(len(wl), len(gl))
 	for i := 0; i < n; i++ {
 		if wl[i] != gl[i] {
 			return formatDiffAt(i+1, wl[i], gl[i], len(wl), len(gl))

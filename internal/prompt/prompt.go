@@ -25,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/huh"
@@ -55,6 +56,11 @@ const (
 	addonEnv      = "env"
 	addonCI       = "ci"            // mengaktifkan CI; provider dipilih terpisah
 	addonObs      = "observability" // otel tracing + prometheus /metrics + health
+	// Catatan strapgorm (Strapi-style query builder di atas GORM, riset 2026-06-11):
+	// SENGAJA tidak punya konstanta add-on di sini & tidak masuk multiselect umum.
+	// Ia di-gate pada grup confirm terpisah (q_strapgorm) yang hanya muncul saat
+	// arch=monolith & db∈{postgres,mysql}; bila dipilih, access di-auto-set ke gorm
+	// (REUSE *gorm.DB — tanpa pool kedua). Lihat grup q_strapgorm di Ask().
 )
 
 // HuhPrompter adalah implementasi Prompter berbasis charmbracelet/huh.
@@ -87,6 +93,11 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 		git        = p.DefaultGit
 		addons     = []string{addonMakefile, addonGolangci, addonEnv, addonCI}
 		ciProvider = string(answers.CIGitHubActions)
+
+		// strapgorm (q_strapgorm) — confirm terpisah, HANYA muncul saat
+		// arch=monolith & db∈{postgres,mysql} (precondition di-gate per-grup via
+		// WithHideFunc). Bila true, access dipaksa ke gorm (REUSE *gorm.DB).
+		strapgorm = false
 
 		// Microservice (q_svc, muncul bila arch=microservice). comm dikunci grpc v1
 		// (rest/event ditandai "menyusul"); gateway opsional (default off).
@@ -204,6 +215,21 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 				).
 				Value(&addons),
 		).WithHideFunc(func() bool { return arch == string(answers.ArchMicroservice) }),
+		// Grup q_strapgorm — add-on strapgorm (Strapi-style query builder di atas
+		// GORM). HANYA muncul saat precondition terpenuhi: arch=monolith DAN
+		// db∈{postgres,mysql}. Bila dipilih, access di-auto-set ke gorm setelah form
+		// (REUSE *gorm.DB — tanpa pool kedua). Di-gate per-grup (bukan opsi di
+		// multiselect umum) agar precondition arch/db bisa ditegakkan via HideFunc —
+		// selaras constraint CLI validateStrapgormConstraint (byte-identical §5.2).
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Aktifkan strapgorm (Strapi-style query builder di atas GORM)?").
+				Description("filters/sort/pagination/populate via query string; akan mengunci access=gorm").
+				Value(&strapgorm),
+		).WithHideFunc(func() bool {
+			return arch != string(answers.ArchMonolith) ||
+				(db != string(answers.DBPostgres) && db != string(answers.DBMySQL))
+		}),
 		// Grup 6 — provider CI (q_addons[ci], SPEC §4.8). Hanya muncul bila add-on
 		// "ci" dipilih (depends-on dinamis via WithHideFunc — dievaluasi saat navigasi)
 		// DAN bukan microservice.
@@ -235,6 +261,18 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 	mod = strings.TrimSpace(mod)
 	if mod == "" {
 		mod = "github.com/" + name
+	}
+
+	// strapgorm auto-set: bila user mengaktifkan strapgorm, access DIKUNCI ke gorm
+	// (strapgorm bekerja di atas *gorm.DB — REUSE koneksi access-gorm, tanpa pool
+	// kedua). Group q_strapgorm hanya muncul saat arch=monolith & db∈{postgres,
+	// mysql}, jadi override ini aman & deterministik. Disetel sebelum proyeksi
+	// Answers agar a.Access konsisten dengan jalur flag (--addons strapgorm
+	// --access gorm) → byte-identical (SPEC §5.2).
+	if strapgorm &&
+		arch == string(answers.ArchMonolith) &&
+		(db == string(answers.DBPostgres) || db == string(answers.DBMySQL)) {
+		access = string(answers.AccessGORM)
 	}
 
 	// CABANG MICROSERVICE: bila arch=microservice, Answers difokuskan ke q_svc
@@ -277,6 +315,11 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 		Lint:       addonSet[addonGolangci],
 		EnvExample: addonSet[addonEnv],
 		Obs:        addonSet[addonObs],
+		// strapgorm (q_strapgorm) — grup confirm terpisah; hanya muncul saat
+		// arch=monolith & db∈{postgres,mysql}, dan access sudah di-auto-set ke gorm
+		// di atas. Prasyarat keras tetap ditegakkan answers.Validate (otoritas
+		// tunggal) — selaras jalur flag (--addons strapgorm). byte-identical §5.2.
+		Strapgorm: strapgorm,
 
 		// Git.
 		Git: git,
@@ -311,14 +354,9 @@ func (p *HuhPrompter) Ask(ctx context.Context) (answers.Answers, error) {
 }
 
 // containsString mengembalikan true bila slice memuat target (helper kecil untuk
-// HideFunc CI; menghindari import "slices" demi kompatibilitas minimal).
+// HideFunc CI). Tipis di atas slices.Contains agar call-site tetap ekspresif.
 func containsString(ss []string, target string) bool {
-	for _, s := range ss {
-		if s == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ss, target)
 }
 
 // svcNameRE memvalidasi satu nama service (SPEC §4.5): huruf kecil di awal,
@@ -330,7 +368,7 @@ var svcNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 func parseServiceList(s string) []answers.Service {
 	seen := make(map[string]bool)
 	var out []answers.Service
-	for _, part := range strings.Split(s, ",") {
+	for part := range strings.SplitSeq(s, ",") {
 		n := strings.TrimSpace(part)
 		if n == "" || seen[n] {
 			continue

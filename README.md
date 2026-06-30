@@ -151,6 +151,11 @@ gostarter create --name platform --arch microservice \
 # Microservice dengan flag --service repeatable (setara --services)
 gostarter create --name platform --arch microservice \
   --service order --service user --comm grpc --non-interactive
+
+# Add-on strapgorm: endpoint list gaya Strapi GET /api/products di atas GORM
+# (butuh --access gorm + --db postgres|mysql + --arch monolith; prasyarat Go 1.25)
+gostarter create --name shop --arch monolith --db postgres \
+  --access gorm --addons strapgorm,docker --yes
 ```
 
 ### Preset `--config`
@@ -212,8 +217,9 @@ gostarter add service payment --dry-run
 | `--db` | `none` \| `postgres` \| `mysql` | `none` | Database. |
 | `--access` | `sqlx` \| `database/sql` \| `gorm` | `sqlx` | Lapisan akses query (butuh `--db∈{postgres,mysql}`). `gorm` mengaktifkan koneksi `gorm.io/gorm` + driver (`gorm.io/driver/postgres` atau `gorm.io/driver/mysql`) plus contoh model + `AutoMigrate` + repository, menggantikan koneksi pgxpool/`database/sql` default. |
 | `--migrate` | `golang-migrate` | — | Tool migrasi (butuh `--db≠none`). |
-| `--addons` | `docker,makefile,golangci,env,ci,observability` (csv) | — | Add-on yang diaktifkan. |
+| `--addons` | `docker,makefile,golangci,env,ci,observability,strapgorm` (csv) | — | Add-on yang diaktifkan. |
 | `--feature` | (sama seperti `--addons`) | — | Add-on tambahan, digabung union dengan `--addons`. |
+| `--addons strapgorm` | (lihat keterangan) | — | Endpoint list gaya Strapi `GET /api/products` di atas GORM via `github.com/faisalcayunda/strapgorm` (filter/sort/pagination/fields/search parameterized). **Constraint:** butuh `--access gorm` + `--db postgres\|mysql` (didukung di KETIGA arsitektur). Bentuk per-arch: **monolith** → domain `internal/product/**` (REUSE `*gorm.DB` access=gorm, tanpa pool kedua); **modular-monolith** → domain modular kelas-satu `internal/modules/product/**` (facade + `internal/core` berduri, di-inject `*gorm.DB` access=gorm lewat composition root, ter-wire ke `httpserver.New` via anchor `region:modules`); **microservice** → service `product` mandiri (gRPC Ping + HTTP `GET /api/products`) dgn koneksi GORM per-service + service DB di `docker-compose`. `--access` non-gorm / `--db none` ditolak ramah. Prasyarat Go 1.25 (go directive project dinaikkan ke 1.25). Dep dipin ke `v0.0.0-20260610233751-7c87a8f27fb1` (pseudo-version; akan jadi tag rilis). |
 | `--ci` | `github-actions` \| `gitlab-ci` | `github-actions` | Provider CI (saat addon `ci` aktif). |
 | `--comm` | `grpc` | `grpc` | Pola komunikasi microservice (rest/event menyusul). |
 | `--services` | csv, mis. `order,user` | — | Daftar service (microservice). |

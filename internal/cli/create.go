@@ -89,10 +89,17 @@ func newCreateCmd() *cobra.Command {
 			"  --arch  monolith | modular-monolith\n" +
 			"  --http  net/http | chi | echo\n" +
 			"  --db    none | postgres | mysql\n" +
-			"  --addons/--feature  docker,makefile,golangci,env,ci,observability\n" +
+			"  --addons/--feature  docker,makefile,golangci,env,ci,observability,strapgorm\n" +
 			"  --ci    github-actions | gitlab-ci (provider CI bila addon 'ci' aktif)\n" +
 			"  --config <file.yaml>  preset jawaban (precedence: default < preset < flag).\n" +
-			"(microservice & gin/fiber & sqlite/mongo menyusul di fase berikutnya.)",
+			"\n" +
+			"Add-on strapgorm (Strapi-style query builder di atas GORM):\n" +
+			"  butuh --access gorm + --db postgres|mysql (didukung di KETIGA arch):\n" +
+			"   - monolith         → domain internal/product/** (GET /api/products)\n" +
+			"   - modular-monolith → domain modular internal/modules/product/**\n" +
+			"   - microservice     → service product mandiri (gRPC Ping + HTTP /api/products)\n" +
+			"  access non-gorm / db none ditolak ramah.\n" +
+			"(gin/fiber & sqlite/mongo menyusul di fase berikutnya.)",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCreate(cmd, f)
@@ -117,11 +124,11 @@ func newCreateCmd() *cobra.Command {
 	fl.StringVar(&f.access, "access", "", "lapisan akses query: sqlx|database/sql|gorm (butuh --db∈{postgres,mysql}, C2)")
 	fl.StringVar(&f.migrate, "migrate", "", "tool migrasi (Fase 4a: golang-migrate; butuh --db∉{none}, C1)")
 	fl.StringVar(&f.ci, "ci", "", "provider CI bila addon 'ci' aktif: github-actions|gitlab-ci (default github-actions)")
-	fl.StringSliceVar(&f.addons, "addons", nil, "add-ons csv: docker,makefile,golangci,env,ci,observability")
+	fl.StringSliceVar(&f.addons, "addons", nil, "add-ons csv: docker,makefile,golangci,env,ci,observability,strapgorm (strapgorm butuh --access gorm + --db postgres|mysql + --arch monolith)")
 	// --feature di-MERGE dengan --addons (union, dedup) — bukan alias last-wins (M-2).
 	// SPEC menyebut --feature/--addons; keduanya menulis ke slice terpisah lalu
 	// digabung di buildAnswers agar tak saling menimpa.
-	fl.StringSliceVar(&f.features, "feature", nil, "add-on tambahan (digabung union dengan --addons)")
+	fl.StringSliceVar(&f.features, "feature", nil, "add-on tambahan (digabung union dengan --addons; nilai sama, mis. strapgorm)")
 
 	fl.BoolVar(&f.git, "git", false, "jalankan git init + initial commit")
 	fl.BoolVar(&f.noGit, "no-git", false, "jangan jalankan git init (default non-interaktif)")
@@ -135,6 +142,20 @@ func newCreateCmd() *cobra.Command {
 
 	return cmd
 }
+
+// addonStrapgorm adalah nilai kanonik add-on strapgorm pada --addons/--feature
+// dan multiselect wizard (Strapi-style query builder di atas GORM, riset
+// 2026-06-11). Diproyeksikan ke Answers.Strapgorm di flagsToAnswers; REUSE
+// *gorm.DB dari access=gorm — resolver mengaktifkan modul feature-strapgorm tanpa
+// membuka pool kedua.
+//
+// CONSTRAINT: strapgorm sah bila access=gorm DAN db ∈ {postgres, mysql} — kini di
+// KETIGA arsitektur (monolith: domain internal/product/**; modular-monolith:
+// domain modular internal/modules/product/**; microservice: service product
+// mandiri gRPC+HTTP). Prasyarat ini DITEGAKKAN oleh answers.Validate (otoritas
+// tunggal field-level) yang menolak ramah bila tak terpenuhi — CLI tidak
+// menduplikasi pengecekan. access non-gorm / db none ditolak.
+const addonStrapgorm = "strapgorm"
 
 // runCreate menjalankan orchestration create.
 func runCreate(cmd *cobra.Command, f *createFlags) error {
@@ -167,6 +188,9 @@ func runCreate(cmd *cobra.Command, f *createFlags) error {
 	// DataOverride + hook buf-generate) → EnsureEmptyDir → Generate → hooks. Tidak ada
 	// cabang dini ke island internal/cli/micro lagi.
 	if err := a.Validate(); err != nil {
+		// answers.Validate adalah otoritas tunggal constraint field-level, TERMASUK
+		// prasyarat keras add-on strapgorm (access=gorm + db∈{postgres,mysql} +
+		// arch=monolith) — pesan ramah berasal dari sana, tak diduplikasi di CLI.
 		return fmt.Errorf("validasi input gagal: %w", err)
 	}
 
@@ -298,6 +322,10 @@ func flagsToAnswers(cmd *cobra.Command, f *createFlags) answers.Answers {
 		EnvExample: addonSet["env"],
 		// observability add-on (otel + /metrics + health) → Obs (SPEC §4.8/§5.1 --obs).
 		Obs: addonSet["observability"],
+		// strapgorm add-on → Strapgorm. Prasyarat keras (access=gorm + db∈{postgres,
+		// mysql} + arch=monolith) ditegakkan answers.Validate (otoritas tunggal);
+		// di sini hanya proyeksi langsung dari union add-on (selaras Docker/Obs/Lint).
+		Strapgorm: addonSet[addonStrapgorm],
 
 		Git: git,
 

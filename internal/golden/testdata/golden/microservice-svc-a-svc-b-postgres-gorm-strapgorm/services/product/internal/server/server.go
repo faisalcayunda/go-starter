@@ -1,0 +1,31 @@
+// Package server mengimplementasikan gRPC ProductService untuk service "product".
+// Ia meng-embed UnimplementedProductServiceServer (forward-compat: menambah rpc
+// baru di proto tak memecah build) lalu menyediakan Ping. API query data Product
+// (filter/sort/pagination Strapi) diekspos lewat HTTP (lihat store.ListHandler),
+// bukan gRPC — strapgorm bersifat HTTP-query-native.
+package server
+
+import (
+	"context"
+	"log/slog"
+
+	productv1 "example.com/shopms/gen/go/product/v1"
+)
+
+// Server adalah implementasi ProductServiceServer.
+type Server struct {
+	productv1.UnimplementedProductServiceServer
+	log *slog.Logger
+}
+
+// New membangun Server dengan logger terstruktur.
+func New(log *slog.Logger) *Server {
+	return &Server{log: log}
+}
+
+// Ping mengembalikan "pong dari service product: <name>" — implementasi minimal
+// yang membuktikan service hidup & dapat dipanggil lintas-service via gRPC.
+func (s *Server) Ping(ctx context.Context, req *productv1.PingRequest) (*productv1.PingResponse, error) {
+	s.log.Info("Ping diterima", slog.String("name", req.GetName()))
+	return &productv1.PingResponse{Message: "pong dari service product: " + req.GetName()}, nil
+}

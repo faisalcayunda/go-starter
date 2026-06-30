@@ -389,6 +389,41 @@ func mvpRegistry() *fakeRegistry {
 				{Target: ".env.example", Anchor: "app", Fragment: "fragments/env.app.extra.tmpl", Order: 5, When: ".EnvExample"},
 			},
 		},
+		// feature-strapgorm (v1 bounded): domain contoh Product di atas GORM via
+		// strapgorm query builder. AKTIF hanya saat access=gorm ∧ db∈{postgres,mysql}
+		// ∧ arch=monolith (ditegakkan resolver). Me-REUSE *gorm.DB milik access-gorm-*
+		// (requires core; access-gorm-* dijamin aktif resolver). Fixture MENCERMINKAN
+		// PERSIS manifest nyata (templates/modules/feature-strapgorm/module.yaml):
+		// 4 file domain internal/product/** (model/repository/handler/wiring, mode
+		// render), GoMod EKSAK strapgorm @ pseudo-version pin (gorm + driver sudah dari
+		// access-gorm; tak diulang), dan 4 contributes AUTO-WIRE order 30 — main.go
+		// (imports+wiring: product.SetDB(db)+AutoMigrate me-REUSE var db) & server.go
+		// (imports+routes: product.Mount(mux) → GET /api/products). Guard
+		// TestFakeRegistryMatchesRealManifests menegakkan kesetaraan (cmpExact).
+		modFeatureStrapgorm: {
+			Name:        modFeatureStrapgorm,
+			Description: "domain Product (strapgorm query builder di atas GORM)",
+			Requires:    []string{modCore},
+			Files: []module.FileSpec{
+				{Template: "internal/product/model.go.tmpl", Target: "internal/product/model.go", Mode: "render"},
+				{Template: "internal/product/repository.go.tmpl", Target: "internal/product/repository.go", Mode: "render"},
+				{Template: "internal/product/handler.go.tmpl", Target: "internal/product/handler.go", Mode: "render"},
+				{Template: "internal/product/wiring.go.tmpl", Target: "internal/product/wiring.go", Mode: "render"},
+			},
+			GoMod: []module.ModuleDep{
+				{Path: strapgormModulePath, Version: strapgormVersion},
+			},
+			Contributes: []module.MergeContribution{
+				// AUTO-WIRE main: import product + product.SetDB(db)+AutoMigrate
+				// (order 30 > 25 access-gorm: var `db` sudah dideklarasikan fragmen GORM).
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "imports", Fragment: "fragments/main.imports.strapgorm.tmpl", Order: 30},
+				{Target: "cmd/{{ modBase .ModulePath }}/main.go", Anchor: "wiring", Fragment: "fragments/main.wiring.strapgorm.tmpl", Order: 30},
+				// AUTO-WIRE server.go (monolith net/http): import product + Mount(mux)
+				// → rute GET /api/products pada anchor routes httpserver.New.
+				{Target: "internal/httpserver/server.go", Anchor: "imports", Fragment: "fragments/server.imports.strapgorm.tmpl", Order: 30},
+				{Target: "internal/httpserver/server.go", Anchor: "routes", Fragment: "fragments/server.routes.strapgorm.tmpl", Order: 30},
+			},
+		},
 	})
 }
 
@@ -686,6 +721,360 @@ func TestResolve_MySQL_AccessGORM(t *testing.T) {
 	}
 	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/mysql.go"); ok {
 		t.Errorf("mysql.go (database/sql) TIDAK boleh ter-emit saat access=gorm")
+	}
+}
+
+// ── Strapgorm (v1 bounded): add-on Product domain via GORM ────────────────────
+
+// TestResolve_Strapgorm_Postgres memverifikasi jalur HAPPY add-on strapgorm pada
+// kombinasi yang diizinkan (monolith + access=gorm + db=postgres):
+//   - modul feature-strapgorm aktif → file domain internal/product/** ter-emit;
+//   - dep strapgorm hadir dengan PIN versi EKSAK (pseudo-version), berdampingan
+//     dengan gorm + driver/postgres (dari access-gorm); pool kedua TIDAK dibuka
+//     (postgres.go pgxpool tetap di-gate off oleh access=gorm);
+//   - route /api/products ter-AUTO-WIRE ke main.go (anchor imports+wiring);
+//   - GoVersion project = 1.25 (strapgorm butuh Go ≥ 1.25).
+func TestResolve_Strapgorm_Postgres(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessGORM
+	a.Strapgorm = true
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve strapgorm gagal: %v", err)
+	}
+
+	// File domain Product ter-emit (semua dimiliki feature-strapgorm). Selaras
+	// manifest nyata: model + repository + handler + wiring (BUKAN service.go).
+	for _, target := range []string{
+		"internal/product/model.go",
+		"internal/product/repository.go",
+		"internal/product/handler.go",
+		"internal/product/wiring.go",
+	} {
+		op, ok := fileOpByTarget(p.Files, target)
+		if !ok {
+			t.Errorf("file domain Product %q harus ter-emit saat strapgorm aktif", target)
+			continue
+		}
+		if op.ModuleName != modFeatureStrapgorm {
+			t.Errorf("%q harus dimiliki %q, dapat %q", target, modFeatureStrapgorm, op.ModuleName)
+		}
+	}
+
+	// Dep strapgorm hadir dengan PIN EKSAK (byte-identical, §5.2).
+	if !hasDep(p.Deps, strapgormModulePath) {
+		t.Fatalf("dep strapgorm harus ada saat strapgorm aktif: %+v", p.Deps)
+	}
+	for _, d := range p.Deps {
+		if d.Path == strapgormModulePath && d.Version != strapgormVersion {
+			t.Errorf("strapgorm versi salah: %q (mau pin %q)", d.Version, strapgormVersion)
+		}
+	}
+	// gorm + driver/postgres tetap hadir (dari access-gorm) — strapgorm di ATAS GORM.
+	if !hasDep(p.Deps, "gorm.io/gorm") || !hasDep(p.Deps, "gorm.io/driver/postgres") {
+		t.Errorf("gorm + driver/postgres harus tetap ada (strapgorm di atas GORM): %+v", p.Deps)
+	}
+	// Pool kedua TIDAK dibuka: koneksi pgxpool tetap di-gate off oleh access=gorm.
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/postgres.go"); ok {
+		t.Errorf("postgres.go (pgxpool) TIDAK boleh ter-emit (strapgorm REUSE *gorm.DB, bukan pool kedua)")
+	}
+	if _, ok := fileOpByTarget(p.Files, "internal/platform/database/gorm.go"); !ok {
+		t.Errorf("gorm.go harus ter-emit (strapgorm REUSE koneksi GORM access-gorm)")
+	}
+
+	// AUTO-WIRE route /api/products ke main.go (anchor imports + wiring order 30).
+	main, ok := fileOpByTarget(p.Files, "cmd/shop/main.go")
+	if !ok {
+		t.Fatalf("cmd/shop/main.go harus ada di plan")
+	}
+	if main.Mode != plan.ModeMerge {
+		t.Fatalf("main.go harus ModeMerge saat strapgorm auto-wire, dapat %v", main.Mode)
+	}
+	var sawImports, sawWiring bool
+	for _, fr := range main.Fragments {
+		if fr.Anchor == "imports" && strings.Contains(fr.Content, "main.imports.strapgorm") {
+			sawImports = true
+		}
+		if fr.Anchor == "wiring" && strings.Contains(fr.Content, "main.wiring.strapgorm") {
+			sawWiring = true
+		}
+	}
+	if !sawImports {
+		t.Errorf("main.go harus punya fragmen import product (strapgorm) ke anchor imports, fragments: %+v", main.Fragments)
+	}
+	if !sawWiring {
+		t.Errorf("main.go harus punya fragmen wiring /api/products ke anchor wiring, fragments: %+v", main.Fragments)
+	}
+
+	// GoVersion project = 1.25 (strapgorm butuh Go ≥ 1.25).
+	if p.GoVersion != "1.25" {
+		t.Errorf("GoVersion = %q, mau \"1.25\" (strapgorm butuh Go ≥ 1.25)", p.GoVersion)
+	}
+}
+
+// TestResolve_Strapgorm_MySQL memverifikasi happy path analog pada db=mysql:
+// feature-strapgorm aktif, dep strapgorm pin benar, gorm + driver/mysql hadir,
+// GoVersion 1.25.
+func TestResolve_Strapgorm_MySQL(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBMySQL
+	a.Access = answers.AccessGORM
+	a.Strapgorm = true
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve strapgorm+mysql gagal: %v", err)
+	}
+	if _, ok := fileOpByTarget(p.Files, "internal/product/handler.go"); !ok {
+		t.Errorf("handler Product harus ter-emit saat strapgorm+mysql aktif")
+	}
+	if !hasDep(p.Deps, strapgormModulePath) {
+		t.Errorf("dep strapgorm harus ada: %+v", p.Deps)
+	}
+	if !hasDep(p.Deps, "gorm.io/driver/mysql") {
+		t.Errorf("gorm driver/mysql harus tetap ada (strapgorm di atas GORM): %+v", p.Deps)
+	}
+	if p.GoVersion != "1.25" {
+		t.Errorf("GoVersion = %q, mau \"1.25\"", p.GoVersion)
+	}
+}
+
+// TestResolve_Strapgorm_Deterministic memverifikasi byte-identical: dua Resolve
+// dengan Answers strapgorm yang sama menghasilkan plan IDENTIK (deps sama, dep
+// strapgorm pin sama persis, FileOp sama).
+func TestResolve_Strapgorm_Deterministic(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessGORM
+	a.Strapgorm = true
+
+	p1, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve p1 gagal: %v", err)
+	}
+	p2, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve p2 gagal: %v", err)
+	}
+	if len(p1.Files) != len(p2.Files) || len(p1.Deps) != len(p2.Deps) {
+		t.Fatalf("plan tidak deterministik: files %d/%d deps %d/%d", len(p1.Files), len(p2.Files), len(p1.Deps), len(p2.Deps))
+	}
+	for i := range p1.Files {
+		if p1.Files[i].TargetPath != p2.Files[i].TargetPath {
+			t.Errorf("FileOp[%d] beda: %q vs %q", i, p1.Files[i].TargetPath, p2.Files[i].TargetPath)
+		}
+	}
+	for i := range p1.Deps {
+		if p1.Deps[i] != p2.Deps[i] {
+			t.Errorf("Dep[%d] beda: %+v vs %+v", i, p1.Deps[i], p2.Deps[i])
+		}
+	}
+}
+
+// TestResolve_Strapgorm_RejectNonGorm memverifikasi penolakan strapgorm tanpa
+// access=gorm (mis. sqlx) → ErrConstraint (C-strapgorm), pesan menyebut syarat.
+func TestResolve_Strapgorm_RejectNonGorm(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessSQLx // bukan gorm → invalid.
+	a.Strapgorm = true
+
+	_, err := r.Resolve(a)
+	if err == nil {
+		t.Fatalf("strapgorm tanpa access=gorm harus ditolak")
+	}
+	if !strings.Contains(err.Error(), "strapgorm") || !strings.Contains(err.Error(), "gorm") {
+		t.Errorf("pesan tolak harus menyebut strapgorm + access gorm: %v", err)
+	}
+}
+
+// TestResolve_Strapgorm_RejectDBNone memverifikasi penolakan strapgorm saat
+// db=none. Ditolak RAMAH di answers.Validate (entry-point, lapis pertama) sebelum
+// resolver — strapgorm butuh db∈{postgres,mysql}. (Lapis kedua C-strapgorm di
+// checkConstraints mengembalikan ErrConstraint, tetapi Validate menang lebih dulu;
+// di sini cukup pastikan Resolve gagal dengan pesan menyebut syarat strapgorm.)
+func TestResolve_Strapgorm_RejectDBNone(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBNone
+	a.Access = answers.AccessGORM
+	a.Strapgorm = true
+
+	_, err := r.Resolve(a)
+	if err == nil {
+		t.Fatalf("strapgorm dengan db=none harus ditolak")
+	}
+	if !strings.Contains(err.Error(), "strapgorm") || !strings.Contains(err.Error(), "postgres|mysql") {
+		t.Errorf("pesan tolak harus menyebut strapgorm + syarat db postgres|mysql: %v", err)
+	}
+}
+
+// realRegistry memuat registry NYATA dari embed.FS — dipakai test yang melibatkan
+// modul strapgorm modular/microservice (tak ada di fixture fake mvpRegistry; fake
+// hanya menutup subset monolith MVP, lihat guard TestFakeRegistryMatchesRealManifests).
+func realRegistry(t *testing.T) module.Registry {
+	t.Helper()
+	reg := module.NewRegistry()
+	if err := reg.Load(templates.FS); err != nil {
+		t.Fatalf("Load registry nyata (templates.FS) gagal: %v", err)
+	}
+	return reg
+}
+
+// TestResolve_Strapgorm_Microservice memverifikasi jalur HAPPY strapgorm pada
+// arch=microservice: service product MANDIRI (gRPC + HTTP strapgorm) ter-emit lewat
+// feature-strapgorm-microservice + driver -postgres; go.mod jujur (gorm + strapgorm +
+// driver postgres saja); GoVersion 1.25.
+func TestResolve_Strapgorm_Microservice(t *testing.T) {
+	r := New(realRegistry(t))
+	a := microAnswers("svc-a", "svc-b")
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessGORM
+	a.Strapgorm = true
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("strapgorm pada arch=microservice harus resolve: %v", err)
+	}
+	// Service product ter-emit (proto + kode service) oleh modul shared microservice.
+	for _, target := range []string{
+		"proto/product/v1/product.proto",
+		"services/product/cmd/main.go",
+		"services/product/internal/config/config.go",
+		"services/product/internal/server/server.go",
+		"services/product/internal/store/store.go",
+		"services/product/internal/store/model.go",
+		"services/product/internal/store/repository.go",
+		"services/product/internal/store/handler.go",
+	} {
+		op, ok := fileOpByTarget(p.Files, target)
+		if !ok {
+			t.Errorf("file service product %q harus ter-emit saat strapgorm microservice", target)
+			continue
+		}
+		if op.ModuleName != modFeatureStrapgormMicro {
+			t.Errorf("%q harus dimiliki %q, dapat %q", target, modFeatureStrapgormMicro, op.ModuleName)
+		}
+	}
+	// go.mod JUJUR: gorm + strapgorm + driver postgres (BUKAN mysql), plus grpc/protobuf.
+	if !hasDep(p.Deps, strapgormModulePath) || !hasDep(p.Deps, "gorm.io/gorm") || !hasDep(p.Deps, "gorm.io/driver/postgres") {
+		t.Errorf("dep gorm+strapgorm+driver/postgres harus ada: %+v", p.Deps)
+	}
+	if hasDep(p.Deps, "gorm.io/driver/mysql") {
+		t.Errorf("driver/mysql TIDAK boleh ada saat db=postgres (go.mod jujur): %+v", p.Deps)
+	}
+	// docker-compose merge memuat fragmen service product + DB postgres + volume.
+	compose, ok := fileOpByTarget(p.Files, "docker-compose.yml")
+	if !ok || compose.Mode != plan.ModeMerge {
+		t.Fatalf("docker-compose.yml harus ModeMerge dengan kontribusi product+db")
+	}
+	var sawProduct, sawDB, sawVol bool
+	for _, fr := range compose.Fragments {
+		if strings.Contains(fr.Content, "compose.product.service") {
+			sawProduct = true
+		}
+		if strings.Contains(fr.Content, "compose.db.service") {
+			sawDB = true
+		}
+		if fr.Anchor == "volumes" && strings.Contains(fr.Content, "compose.db.volume") {
+			sawVol = true
+		}
+	}
+	if !sawProduct || !sawDB || !sawVol {
+		t.Errorf("compose harus punya fragmen product+db+volume: product=%v db=%v vol=%v", sawProduct, sawDB, sawVol)
+	}
+	if p.GoVersion != "1.25" {
+		t.Errorf("GoVersion = %q, mau \"1.25\"", p.GoVersion)
+	}
+}
+
+// TestResolve_Strapgorm_Modular memverifikasi jalur HAPPY strapgorm pada
+// arch=modular-monolith: Product = domain modular kelas-satu (facade + internal/core)
+// di-emit feature-strapgorm-modular; di-AUTO-WIRE ke cmd/<app>/main.go via anchor
+// imports/wiring/modules; dep strapgorm + gorm; GoVersion 1.25.
+func TestResolve_Strapgorm_Modular(t *testing.T) {
+	r := New(realRegistry(t))
+	a := baseAnswers()
+	a.Arch = answers.ArchModularMonolith
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessGORM
+	a.Strapgorm = true
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("strapgorm pada arch=modular-monolith harus resolve: %v", err)
+	}
+	for _, target := range []string{
+		"internal/modules/product/product.go",
+		"internal/modules/product/internal/core/model.go",
+		"internal/modules/product/internal/core/repository.go",
+		"internal/modules/product/internal/core/handler.go",
+	} {
+		op, ok := fileOpByTarget(p.Files, target)
+		if !ok {
+			t.Errorf("file domain Product modular %q harus ter-emit", target)
+			continue
+		}
+		if op.ModuleName != modFeatureStrapgormModular {
+			t.Errorf("%q harus dimiliki %q, dapat %q", target, modFeatureStrapgormModular, op.ModuleName)
+		}
+	}
+	if !hasDep(p.Deps, strapgormModulePath) || !hasDep(p.Deps, "gorm.io/gorm") || !hasDep(p.Deps, "gorm.io/driver/postgres") {
+		t.Errorf("dep gorm+strapgorm+driver/postgres harus ada (reuse access-gorm): %+v", p.Deps)
+	}
+	// AUTO-WIRE ke composition root cmd/shop/main.go: anchor imports+wiring+modules.
+	main, ok := fileOpByTarget(p.Files, "cmd/shop/main.go")
+	if !ok || main.Mode != plan.ModeMerge {
+		t.Fatalf("cmd/shop/main.go harus ModeMerge (auto-wire strapgorm modular)")
+	}
+	var sawImports, sawWiring, sawModules bool
+	for _, fr := range main.Fragments {
+		if fr.Anchor == "imports" && strings.Contains(fr.Content, "main.imports.strapgorm") {
+			sawImports = true
+		}
+		if fr.Anchor == "wiring" && strings.Contains(fr.Content, "main.wiring.strapgorm") {
+			sawWiring = true
+		}
+		if fr.Anchor == "modules" && strings.Contains(fr.Content, "main.modules.strapgorm") {
+			sawModules = true
+		}
+	}
+	if !sawImports || !sawWiring || !sawModules {
+		t.Errorf("main.go harus punya fragmen imports+wiring+modules strapgorm: imports=%v wiring=%v modules=%v", sawImports, sawWiring, sawModules)
+	}
+	if p.GoVersion != "1.25" {
+		t.Errorf("GoVersion = %q, mau \"1.25\"", p.GoVersion)
+	}
+}
+
+// TestResolve_NoStrapgorm_GormUnaffected memverifikasi REGRESI: access=gorm tanpa
+// strapgorm TIDAK terpengaruh — tak ada file product, tak ada dep strapgorm,
+// GoVersion tetap default 1.24 (strapgorm tidak menaikkan tanpa diaktifkan).
+func TestResolve_NoStrapgorm_GormUnaffected(t *testing.T) {
+	r := New(mvpRegistry())
+	a := baseAnswers()
+	a.DB = answers.DBPostgres
+	a.Access = answers.AccessGORM
+	// Strapgorm = false.
+
+	p, err := r.Resolve(a)
+	if err != nil {
+		t.Fatalf("Resolve gagal: %v", err)
+	}
+	if _, ok := fileOpByTarget(p.Files, "internal/product/model.go"); ok {
+		t.Errorf("file Product TIDAK boleh ada saat strapgorm=false")
+	}
+	if hasDep(p.Deps, strapgormModulePath) {
+		t.Errorf("dep strapgorm TIDAK boleh ada saat strapgorm=false: %+v", p.Deps)
+	}
+	if p.GoVersion != goVersionDefault {
+		t.Errorf("GoVersion = %q, mau %q (strapgorm tidak menaikkan tanpa diaktifkan)", p.GoVersion, goVersionDefault)
 	}
 }
 
@@ -1722,6 +2111,10 @@ var fakeModulesUnderGuard = map[string]driftSpec{
 	},
 	modAddonLint: {files: cmpExact, contributes: cmpExact},
 	modAddonEnv:  {files: cmpExact, contributes: cmpExact},
+	// feature-strapgorm: fixture MENCERMINKAN penuh manifest nyata
+	// (templates/modules/feature-strapgorm/module.yaml) — 4 file domain Product, 4
+	// contributes AUTO-WIRE (main + server.go, order 30), GoMod strapgorm pin EKSAK.
+	modFeatureStrapgorm: {files: cmpExact, contributes: cmpExact},
 }
 
 // goModSet memetakan path→version dari []module.ModuleDep.

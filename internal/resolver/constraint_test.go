@@ -58,6 +58,59 @@ func TestCheckConstraints_C1_C2_C18(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "C-strapgorm: strapgorm tanpa access gorm (sqlx)",
+			mutate: func(a *answers.Answers) {
+				a.DB = answers.DBPostgres
+				a.Access = answers.AccessSQLx
+				a.Strapgorm = true
+			},
+			wantErr:  true,
+			wantSubs: []string{"strapgorm", "gorm", "monolith"},
+		},
+		{
+			// Sejak strapgorm meluas ke 3 arch: modular + gorm + postgres = VALID
+			// (bukan lagi ditolak). C-strapgorm hanya menuntut access=gorm + db sql.
+			name: "valid: strapgorm + gorm + postgres + modular",
+			mutate: func(a *answers.Answers) {
+				a.Arch = answers.ArchModularMonolith
+				a.DB = answers.DBPostgres
+				a.Access = answers.AccessGORM
+				a.Strapgorm = true
+			},
+			wantErr: false,
+		},
+		{
+			// microservice + gorm + postgres juga VALID (service product mandiri).
+			// Catatan: untuk microservice DB/Access tak di-skip di checkConstraints,
+			// jadi C-strapgorm yang menegakkan gorm+postgres pada jalur ini.
+			name: "valid: strapgorm + gorm + postgres + microservice",
+			mutate: func(a *answers.Answers) {
+				a.Arch = answers.ArchMicroservice
+				a.DB = answers.DBPostgres
+				a.Access = answers.AccessGORM
+				a.Strapgorm = true
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid: strapgorm + gorm + postgres + monolith",
+			mutate: func(a *answers.Answers) {
+				a.DB = answers.DBPostgres
+				a.Access = answers.AccessGORM
+				a.Strapgorm = true
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid: strapgorm + gorm + mysql + monolith",
+			mutate: func(a *answers.Answers) {
+				a.DB = answers.DBMySQL
+				a.Access = answers.AccessGORM
+				a.Strapgorm = true
+			},
+			wantErr: false,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -197,9 +250,32 @@ func TestGoVersionFor(t *testing.T) {
 			t.Errorf("goVersionFor(%q) = %q, mau %q", c.arch, got, c.want)
 		}
 	}
-	// Konstanta selaras kontrak: microservice = 1.25, default = 1.24.
+	// Cabang Strapgorm: menaikkan ke 1.25 untuk arch NON-microservice (monolith &
+	// modular). Untuk microservice, cabang microservice menang lebih dulu — TAPI
+	// juga 1.25, jadi semua jalur strapgorm = 1.25 (strapgorm butuh Go ≥ 1.25).
+	strapgormCases := []struct {
+		arch answers.Arch
+		want string
+	}{
+		{answers.ArchMonolith, goVersionStrapgorm},
+		{answers.ArchModularMonolith, goVersionStrapgorm},
+		{answers.ArchMicroservice, goVersionMicroservice}, // micro menang; sama-sama 1.25
+	}
+	for _, c := range strapgormCases {
+		got := goVersionFor(answers.Answers{Arch: c.arch, Strapgorm: true})
+		if got != c.want {
+			t.Errorf("goVersionFor(strapgorm, %q) = %q, mau %q", c.arch, got, c.want)
+		}
+		if got != "1.25" {
+			t.Errorf("semua jalur strapgorm harus 1.25, arch=%q dapat %q", c.arch, got)
+		}
+	}
+	// Konstanta selaras kontrak: microservice = 1.25, strapgorm = 1.25, default = 1.24.
 	if goVersionMicroservice != "1.25" {
 		t.Errorf("goVersionMicroservice = %q, mau 1.25 (grpc v1.81.1)", goVersionMicroservice)
+	}
+	if goVersionStrapgorm != "1.25" {
+		t.Errorf("goVersionStrapgorm = %q, mau 1.25", goVersionStrapgorm)
 	}
 	if goVersionDefault != "1.24" {
 		t.Errorf("goVersionDefault = %q, mau 1.24", goVersionDefault)

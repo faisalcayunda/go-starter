@@ -1,0 +1,30 @@
+# docker-compose.yml — skeleton ber-anchor (dirakit ModeMerge oleh assembler).
+# Modul DB/broker menyumbang fragmen ke anchor services/volumes.
+services:
+  # region:services (addon-docker) — service aplikasi (build dari Dockerfile).
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+    restart: unless-stopped
+  # region:services (db-postgres) — service PostgreSQL.
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  # region:volumes (db-postgres) — volume data PostgreSQL persisten.
+  postgres-data:

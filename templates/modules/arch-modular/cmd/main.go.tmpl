@@ -51,12 +51,21 @@ func main() {
 	// inisialisasi di sini lewat ModeMerge. Pada profil stdlib default seluruh
 	// wiring domain ada di atas.
 
-	// ── Server: pasang rute kedua domain lewat httpserver netral-domain ──────
+	// ── Server: pasang rute tiap domain lewat httpserver netral-domain ───────
+	// Daftar modul ditulis multiline dengan anchor region:modules di akhir varargs
+	// agar add-on (mis. feature-strapgorm-modular) dapat menyisipkan domainnya
+	// sendiri lewat ModeMerge tanpa menyentuh signature New(). Tanpa penyumbang,
+	// marker komentar netral tetap ada (idempotensi merge) & valid sebagai argumen
+	// (trailing comma + komentar di antara argumen = legal Go).
 	srv := httpserver.New(httpserver.Options{
 		Addr:         cfg.Addr(),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
-	}, logger, catalogMod, ordersMod)
+	}, logger,
+		catalogMod,
+		ordersMod,
+		// region:modules
+	)
 
 	// Jalankan server pada goroutine terpisah agar main dapat menunggu sinyal
 	// shutdown lewat ctx.Done.

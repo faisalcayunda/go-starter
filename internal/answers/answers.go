@@ -19,6 +19,13 @@
 // Comm=grpc (default; rest/event DITOLAK ramah "v1: gRPC"). Gateway opsional
 // (default off). Constraint silang (mis. kombinasi monolith-only) tetap di
 // resolver. monolith/modular tidak berubah dari 4a.
+//
+// STRAPGORM (v1 bounded): add-on Strapgorm (--addons/--feature strapgorm)
+// menambah domain contoh Product (model + repository GORM via strapgorm query
+// builder + handler GET /api/products) yang me-REUSE *gorm.DB milik access=gorm.
+// Prasyarat keras (access=gorm + db∈{postgres,mysql} + arch=monolith) ditolak
+// RAMAH di Validate() bila tak terpenuhi; aktivasi modul feature-strapgorm di
+// resolver. modular-monolith/microservice/access lain = fase berikutnya.
 package answers
 
 import (
@@ -200,6 +207,16 @@ type Answers struct {
 	Obs        bool // --obs / --no-obs
 	Auth       Auth // --auth
 	EnvExample bool // --env-example / --no-env-example
+	// Strapgorm mengaktifkan add-on "strapgorm" (--addons/--feature strapgorm,
+	// multiselect wizard): domain contoh Product (model + repository GORM via
+	// strapgorm query-builder + handler GET /api/products). Constraint silang =
+	// butuh access=gorm + db∈{postgres,mysql} (ditegakkan Validate() di bawah).
+	// Didukung di KETIGA arsitektur — bentuk berbeda per arch: monolith REUSE
+	// *gorm.DB access=gorm (tanpa pool kedua); modular-monolith = domain modular
+	// internal/modules/product/** di-inject *gorm.DB access=gorm; microservice =
+	// service product mandiri (gRPC + HTTP) dgn koneksi GORM per-service. Aktivasi
+	// modul feature-strapgorm[-modular|-microservice(+driver)] di resolver.
+	Strapgorm bool // --addons/--feature strapgorm
 
 	// Opsi terkunci (flag-only, SPEC §5.1)
 	ConfigLoader ConfigLoader // --config-loader
@@ -282,6 +299,12 @@ func (a Answers) Validate() error {
 			// dipakai sebagai nama service biasa agar tak bentrok dgn dir gateway opsional.
 			if svc.Name == "gateway" {
 				return fmt.Errorf("nama service %q reserved (dipakai untuk API gateway edge); pilih nama lain", svc.Name)
+			}
+			// Reserved saat strapgorm aktif: add-on strapgorm microservice meng-emit
+			// service "product" di services/product/** — nama service mesh "product"
+			// akan bentrok (double-ownership FileOp). Cegah fail-fast (pesan ramah).
+			if a.Strapgorm && svc.Name == "product" {
+				return fmt.Errorf("nama service %q bentrok dengan service product yang dihasilkan add-on strapgorm; pilih nama lain (atau nonaktifkan strapgorm)", svc.Name)
 			}
 			if seen[svc.Name] {
 				return fmt.Errorf("nama service %q duplikat: nama service harus unik", svc.Name)
@@ -391,6 +414,27 @@ func (a Answers) Validate() error {
 		return fmt.Errorf("auth %q belum didukung di MVP (Fase 3 belum menyertakan auth scaffold); akan hadir di fase berikutnya", a.Auth)
 	default:
 		return fmt.Errorf("auth %q tidak dikenal: pilih 'none' (atau kosongkan); 'jwt'/'paseto' menyusul", a.Auth)
+	}
+
+	// 10. Add-on strapgorm — Strapi-style query builder di atas GORM. Prasyarat
+	//     KERAS lintas-arsitektur: akses query memakai GORM (access WAJIB gorm) dan
+	//     driver DB ∈ {postgres, mysql} (yang didukung GORM di subset ini). KETIGA
+	//     arsitektur kini didukung:
+	//       - monolith         → domain internal/product/** me-REUSE *gorm.DB access=gorm;
+	//       - modular-monolith → domain modular internal/modules/product/** (facade +
+	//         internal/core), di-inject *gorm.DB access=gorm lewat composition root;
+	//       - microservice     → service product mandiri (gRPC Ping + HTTP /api/products
+	//         via strapgorm) dengan koneksi GORM sendiri (per-service DB).
+	//     Untuk microservice, a.DB/a.Access TIDAK divalidasi di langkah 5–7 (di-skip
+	//     untuk microservice) — pengecekan di sini menjadi satu-satunya penegak gorm+
+	//     postgres|mysql pada jalur itu. Bila strapgorm aktif tetapi salah satu
+	//     prasyarat tak terpenuhi → tolak RAMAH di sini (field-level entry point)
+	//     dengan pesan tunggal. (Constraint silang dicermin resolver checkConstraints
+	//     sebagai C-strapgorm, lapis kedua fail-fast.)
+	if a.Strapgorm {
+		if a.Access != AccessGORM || (a.DB != DBPostgres && a.DB != DBMySQL) {
+			return fmt.Errorf("strapgorm butuh --access gorm + --db postgres|mysql (arch: monolith|modular-monolith|microservice)")
+		}
 	}
 
 	return nil

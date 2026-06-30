@@ -1,0 +1,63 @@
+# docker-compose.yml — orkestrasi seluruh service monorepo (ber-anchor, dirakit
+# ModeMerge oleh assembler). Tiap service microservice menyumbang satu blok ke
+# anchor region:services; modul DB (bila aktif) menyumbang service + volume-nya.
+services:
+  # service "svc-a" (arch-microservice).
+  svc-a:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: svc-a
+    env_file:
+      - .env
+    # Service pertama mengekspos HTTP /call (bukti inter-service call).
+    ports:
+      - "8081:8081"
+    depends_on:
+      - svc-b
+    restart: unless-stopped
+  # service "svc-b" (arch-microservice).
+  svc-b:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: svc-b
+    env_file:
+      - .env
+    restart: unless-stopped
+  # service "product" (strapgorm: GET /api/products via GORM + gRPC Ping).
+  product:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: product
+    env_file:
+      - .env
+    environment:
+      # Password memakai ${DB_PASSWORD:-app} agar selaras dgn POSTGRES_PASSWORD service postgres.
+      PRODUCT_DB_DSN: "host=postgres user=app password=${DB_PASSWORD:-app} dbname=app port=5432 sslmode=disable"
+    ports:
+      - "8082:8082"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+  # database PostgreSQL untuk service product (strapgorm, koneksi GORM per-service).
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - product-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+  # region:services keep
+
+volumes:
+  # region:volumes (feature-strapgorm-microservice-postgres) — volume data PostgreSQL persisten.
+  product-postgres-data:

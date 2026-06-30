@@ -1,0 +1,104 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul feature-strapgorm: add-on domain contoh "Product" memakai strapgorm
+# (Strapi-style query builder di atas GORM). AKTIF hanya bila add-on strapgorm
+# diminta DAN prasyarat terpenuhi: access=gorm ∧ db ∈ {postgres, mysql} ∧
+# arch=monolith (ditegakkan answers.Validate + CLI; resolver mengaktifkan modul
+# ini hanya pada kombinasi itu).
+#
+# REUSE koneksi *gorm.DB milik access-gorm-<driver>: main membuka `db` (fragmen
+# access-gorm), lalu fragmen wiring modul INI (order 30 > 25 access-gorm)
+# memanggil product.SetDB(db) + product.AutoMigrate() — TANPA membuka pool kedua.
+# Rute GET /api/products didaftarkan pada anchor region:routes httpserver.New
+# secara FRAMEWORK-AWARE (monolith, semua profil HTTP yang didukung): net/http via
+# product.Mount(mux), chi via r.Get(.., product.ListHandler()), echo via
+# e.GET(.., echo.WrapHandler(product.ListHandler())). product.ListHandler()
+# (http.HandlerFunc netral-framework) menjaga satu sumber perakitan repo+handler.
+name: feature-strapgorm
+description: >-
+  Add-on Product (strapgorm: Strapi-style query builder di atas GORM): model +
+  repository + handler GET /api/products dengan filter/sort/pagination/fields/
+  search aman (parameterized, whitelist skema). REUSE koneksi GORM access=gorm
+  (tanpa pool kedua); rute ter-AUTO-WIRE ke server monolith secara framework-aware
+  (net/http, chi, echo).
+
+# files[] skema FileSpec kanonik {template, target, mode, when}. Tanpa `when`:
+# modul hanya aktif saat resolver memilihnya (strapgorm + access=gorm + db sql +
+# monolith), sehingga seluruh file domain relevan tanpa gating tambahan.
+files:
+  - template: internal/product/model.go.tmpl
+    target:   internal/product/model.go
+    mode:     render
+  - template: internal/product/repository.go.tmpl
+    target:   internal/product/repository.go
+    mode:     render
+  - template: internal/product/handler.go.tmpl
+    target:   internal/product/handler.go
+    mode:     render
+  - template: internal/product/wiring.go.tmpl
+    target:   internal/product/wiring.go
+    mode:     render
+
+# Dependency go.mod dialirkan via gomod: (dirakit modfile.Format, ADR-002 §6).
+# Hanya strapgorm yang BARU di sini — gorm.io/gorm + driver SUDAH dibawa modul
+# access-gorm-<driver>. Versi DIPIN ke pseudo-version terverifikasi (belum ada git
+# tag); string ini WAJIB persis agar go.mod byte-identical (SPEC §5.2).
+# strapgorm butuh Go >= 1.25 (go directive 1.25 disetel resolver untuk kombinasi ini).
+gomod:
+  - path:    github.com/faisalcayunda/strapgorm
+    version: v0.0.0-20260610233751-7c87a8f27fb1
+
+# Membutuhkan core (pemilik main + server.go ber-anchor region:imports/wiring/routes).
+# Ketergantungan pada access-gorm-<driver> (koneksi *gorm.DB) TIDAK dideklarasikan
+# sebagai requires di sini: access-gorm-postgres & access-gorm-mysql saling-konflik,
+# jadi requires salah satunya akan memecah driver lain. Prasyarat access=gorm +
+# db∈{postgres,mysql} ditegakkan answers.Validate + CLI sebelum resolver, dan
+# resolver mengaktifkan modul ini HANYA pada kombinasi yang sudah membawa
+# access-gorm-<driver> (var db pasti ada di main).
+requires:
+  - core
+
+# Tidak ada konflik modul: modul ini murni aditif di atas access-gorm-<driver>.
+conflicts: []
+
+# Kontribusi merge (AUTO-WIRE) ke file shared milik core:
+#   - main region:imports  → import paket product (untuk SetDB/AutoMigrate).
+#   - main region:wiring    → product.SetDB(db) + AutoMigrate (order 30 > 25
+#     access-gorm: var `db` sudah dideklarasikan oleh fragmen access-gorm).
+#   - server.go region:imports → import paket product (untuk ListHandler/Mount).
+#   - server.go region:routes  → pendaftaran rute FRAMEWORK-AWARE: fragmen tunggal
+#     bercabang {{ if eq .HTTP ... }} memakai variabel router yang BENAR-BENAR
+#     in-scope di httpserver.New tiap profil — net/http: mux (product.Mount(mux));
+#     chi: r (r.Get(.., product.ListHandler())); echo: e (e.GET(..,
+#     echo.WrapHandler(product.ListHandler()))).
+# server.go monolith ada untuk SEMUA profil HTTP (net/http core + http-chi +
+# http-echo, di-gate `eq .Arch "monolith"`). Constraint strapgorm = arch=monolith +
+# access=gorm + db∈{postgres,mysql} TANPA membatasi HTTP framework → didukung
+# net/http, chi, echo. (modular-monolith & microservice = fase berikutnya.)
+contributes:
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   imports
+    fragment: fragments/main.imports.strapgorm.tmpl
+    order:    30
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   wiring
+    fragment: fragments/main.wiring.strapgorm.tmpl
+    order:    30
+  - target:   internal/httpserver/server.go
+    anchor:   imports
+    fragment: fragments/server.imports.strapgorm.tmpl
+    order:    30
+  - target:   internal/httpserver/server.go
+    anchor:   routes
+    fragment: fragments/server.routes.strapgorm.tmpl
+    order:    30
+
+# Vars: go directive project = 1.25 (strapgorm minimal Go 1.25). Catatan: buildData
+# menaruh GoVersion PALING AKHIR dari plan.GoVersion (goVersionFor), sehingga Vars
+# di sini TIDAK dapat men-shadow-nya — bump 1.25 yang efektif harus disetel resolver
+# (goVersionFor) untuk kombinasi strapgorm. Var ini didokumentasikan sebagai niat
+# modul; lihat catatan koordinasi engine.
+vars:
+  # CATATAN: field ini TIDAK dibaca resolver untuk menentukan go directive —
+  # minimum Go efektif diatur resolver.goVersionFor (buildData menaruh GoVersion
+  # paling akhir, men-shadow Vars). Disimpan murni sebagai dokumentasi niat modul.
+  GoVersion: "1.25"

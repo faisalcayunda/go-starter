@@ -1,0 +1,96 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul feature-strapgorm-modular: varian add-on strapgorm untuk arch=modular-monolith.
+# AKTIF hanya bila Answers.Strapgorm ∧ access=gorm ∧ db∈{postgres,mysql} ∧
+# arch=modular-monolith (ditegakkan answers.Validate + resolver checkConstraints +
+# resolver.activeModules; fail-fast ErrConstraint bila dilanggar).
+#
+# DESAIN MODULAR (beda dari feature-strapgorm monolith): Product menjadi DOMAIN
+# MODULAR KELAS-SATU di internal/modules/product/** mengikuti layout berduri
+# catalog/orders — facade publik product.go + detail terkurung internal/core/**
+# (model/repository/handler) yang TAK BISA di-import domain lain (semantik internal/
+# Go). Boundary dipaksa compiler, selaras nilai jual modular monolith.
+#
+# REUSE koneksi *gorm.DB access=gorm via INJEKSI (bukan package-global SetDB ala
+# monolith): composition root membuka `db` (fragmen access-gorm region:wiring,
+# order 25), lalu fragmen wiring modul INI (order 30) merakit productMod :=
+# product.New(db) + productMod.AutoMigrate(), dan fragmen modules menyisipkan
+# productMod ke httpserver.New(...) lewat anchor region:modules. TANPA pool kedua.
+#
+# Rute GET /api/products didaftarkan oleh facade product.RegisterRoutes(mux) yang
+# dipanggil httpserver.New untuk tiap Module — SERAGAM lintas HTTP framework
+# (net/http, chi, echo) karena ketiga varian server modular memakai interface
+# Module { RegisterRoutes(*http.ServeMux) } yang sama & memasang domain pada
+# *http.ServeMux stdlib. Maka modul ini TIDAK perlu fragmen rute per-framework.
+name: feature-strapgorm-modular
+description: >-
+  Add-on Product untuk modular monolith (strapgorm: Strapi-style query builder di
+  atas GORM): domain modular kelas-satu internal/modules/product/** (facade +
+  internal/core berduri) dengan GET /api/products (filter/sort/pagination/fields/
+  search aman). Di-inject koneksi GORM access=gorm lewat composition root (tanpa
+  pool kedua); domain ter-AUTO-WIRE ke httpserver.New via anchor region:modules.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}. Semua .go dirender
+# (mengandung {{ modJoin }} import path → wajib render + gofmt). Tanpa `when`: modul
+# hanya aktif saat resolver memilihnya (strapgorm + access=gorm + db sql + modular).
+files:
+  # Facade publik domain Product (permukaan yang disentuh composition root).
+  - template: internal/modules/product/product.go.tmpl
+    target:   internal/modules/product/product.go
+    mode:     render
+  # Detail terkurung di internal/core/** (boundary berduri — tak bisa di-import
+  # domain lain). model/repository/handler.
+  - template: internal/modules/product/internal/core/model.go.tmpl
+    target:   internal/modules/product/internal/core/model.go
+    mode:     render
+  - template: internal/modules/product/internal/core/repository.go.tmpl
+    target:   internal/modules/product/internal/core/repository.go
+    mode:     render
+  - template: internal/modules/product/internal/core/handler.go.tmpl
+    target:   internal/modules/product/internal/core/handler.go
+    mode:     render
+
+# Dependency go.mod via gomod: (modfile.Format, ADR-002 §6). Hanya strapgorm yang
+# BARU di sini — gorm.io/gorm + driver SUDAH dibawa modul access-gorm-<driver>.
+# Versi DIPIN ke pseudo-version terverifikasi (string WAJIB persis → go.mod
+# byte-identical, SPEC §5.2). strapgorm butuh Go ≥ 1.25 (di-set resolver.goVersionFor).
+gomod:
+  - path:    github.com/faisalcayunda/strapgorm
+    version: v0.0.0-20260610233751-7c87a8f27fb1
+
+# Membutuhkan arch-modular (pemilik cmd/<app>/main.go ber-anchor region:imports/
+# wiring/modules + httpserver modular ber-interface Module). Ketergantungan pada
+# access-gorm-<driver> (koneksi *gorm.DB) TIDAK dideklarasikan requires di sini:
+# access-gorm-postgres & access-gorm-mysql saling-konflik, jadi requires salah
+# satunya memecah driver lain. Prasyarat access=gorm + db∈{postgres,mysql}
+# ditegakkan answers.Validate + resolver; resolver mengaktifkan modul ini HANYA
+# pada kombinasi yang sudah membawa access-gorm-<driver> (var db pasti ada di main).
+requires:
+  - arch-modular
+
+# Tidak ada konflik modul: murni aditif di atas arch-modular + access-gorm-<driver>.
+conflicts: []
+
+# Kontribusi merge (AUTO-WIRE) ke composition root milik arch-modular:
+#   - main region:imports  → import facade product (untuk New/RegisterRoutes via Module).
+#   - main region:wiring   → productMod := product.New(db) + AutoMigrate (order 30 >
+#     25 access-gorm: var `db` sudah dideklarasikan fragmen access-gorm).
+#   - main region:modules  → sisipkan productMod ke varargs httpserver.New(...).
+contributes:
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   imports
+    fragment: fragments/main.imports.strapgorm.tmpl
+    order:    30
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   wiring
+    fragment: fragments/main.wiring.strapgorm.tmpl
+    order:    30
+  - target:   cmd/{{ modBase .ModulePath }}/main.go
+    anchor:   modules
+    fragment: fragments/main.modules.strapgorm.tmpl
+    order:    30
+
+# Vars: go directive efektif (1.25) disetel resolver.goVersionFor; di sini hanya
+# dokumentasi niat modul (buildData menaruh GoVersion paling akhir → Vars tak bisa
+# men-shadow-nya).
+vars:
+  GoVersion: "1.25"

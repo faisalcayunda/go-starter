@@ -32,6 +32,23 @@
 // di-sort by TargetPath. addon-docker compose monolith di-GATE ke non-microservice
 // agar tak bentrok dengan compose milik arch-microservice.
 //
+// STRAPGORM: add-on Strapgorm (domain contoh Product: query builder gaya Strapi di
+// atas GORM, GET /api/products) AKTIF saat Answers.Strapgorm ∧ access=gorm ∧
+// db∈{postgres,mysql} (C-strapgorm; ditegakkan answers.Validate + checkConstraints,
+// fail-fast ErrConstraint). Bentuk per-arch (modul terpisah dipilih resolver):
+//   - monolith         → feature-strapgorm: domain internal/product/**, REUSE
+//     *gorm.DB milik access-gorm-<driver> (TIDAK membuka pool kedua);
+//   - modular-monolith → feature-strapgorm-modular: domain modular
+//     internal/modules/product/** (facade + internal/core), *gorm.DB access=gorm
+//     di-inject lewat composition root + anchor region:modules;
+//   - microservice     → feature-strapgorm-microservice (+ -postgres/-mysql):
+//     service product mandiri (gRPC Ping + HTTP /api/products) dgn koneksi GORM
+//     SENDIRI (per-service DB; BUKAN reuse). Driver di-import store.go di-branch
+//     per .DB; gomod driver dari modul -<driver> (go.mod jujur).
+//
+// Dep strapgorm dipin (pseudo-version). GoVersion project dinaikkan ke 1.25
+// (strapgorm butuh Go ≥ 1.25) via goVersionFor.
+//
 // Otak keputusan terpusat di sini (ADR-002 §Decision 2): template tidak pernah
 // mengambil keputusan struktural. ErrConstraint dipakai untuk kombinasi hard-invalid
 // (fail-fast, SPEC §6.4 / DoD #6).
@@ -41,6 +58,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"text/template"
@@ -120,7 +139,60 @@ const (
 	modAddonEnv    = "addon-env"
 	modAddonCI     = "addon-ci"
 	modAddonObs    = "addon-observability"
+
+	// modFeatureStrapgorm : add-on Strapgorm (v1 bounded). Strapi-style query
+	// builder DI ATAS GORM — menambah domain contoh Product (internal/product/**:
+	// model+repository GORM via strapgorm + handler GET /api/products) yang me-REUSE
+	// *gorm.DB milik access=gorm (TIDAK membuka pool kedua; wiring membaca variabel
+	// *gorm.DB dari fragments/main.wiring.gorm.tmpl access-gorm dan memakai-nya
+	// ulang). AKTIF hanya bila Answers.Strapgorm ∧ prasyarat keras terpenuhi
+	// (access=gorm ∧ db∈{postgres,mysql} ∧ arch=monolith) — ditegakkan
+	// answers.Validate + checkConstraints (C-strapgorm). requires core + arch-monolith
+	// + access-gorm-<driver>. Self-emit gomod strapgorm (gorm + driver SUDAH dari
+	// access-gorm).
+	modFeatureStrapgorm = "feature-strapgorm"
+
+	// modFeatureStrapgormModular : varian strapgorm untuk arch=modular-monolith.
+	// Product menjadi domain modular kelas-satu internal/modules/product/** (facade
+	// product.go + internal/core berduri), di-inject *gorm.DB access=gorm lewat
+	// composition root (product.New(db)) dan didaftarkan ke httpserver.New via anchor
+	// region:modules pada cmd/<app>/main.go arch-modular. requires arch-modular;
+	// self-emit gomod strapgorm (gorm + driver dari access-gorm-<driver>).
+	modFeatureStrapgormModular = "feature-strapgorm-modular"
+
+	// modFeatureStrapgormMicro : varian strapgorm untuk arch=microservice — service
+	// product MANDIRI (gRPC Ping + HTTP GET /api/products via strapgorm) dengan koneksi
+	// GORM SENDIRI (per-service DB; TIDAK me-reuse access-gorm yang bercorak monolith).
+	// Modul SHARED ini meng-emit seluruh kode product (proto, cmd, config, server,
+	// store) + kontribusi compose service product; import driver GORM di store.go
+	// di-branch per .DB. requires arch-microservice; gomod gorm + strapgorm.
+	modFeatureStrapgormMicro = "feature-strapgorm-microservice"
+
+	// modFeatureStrapgormMicroPostgres / -MySQL : modul driver-spesifik untuk service
+	// product microservice. Murni gomod driver GORM (postgres|mysql) + kontribusi
+	// compose DB service + volume — TANPA file .go (driver di-import store.go modul
+	// shared, di-branch per .DB → go.mod jujur: hanya driver terpilih). Mengikuti
+	// pola access-gorm-<driver>. requires feature-strapgorm-microservice; saling
+	// konflik (tepat satu driver aktif).
+	modFeatureStrapgormMicroPostgres = "feature-strapgorm-microservice-postgres"
+	modFeatureStrapgormMicroMySQL    = "feature-strapgorm-microservice-mysql"
 )
+
+// strapgormModulePath & strapgormVersion adalah pin EKSAK dependency strapgorm
+// (riset terverifikasi 2026-06-11): belum ada git tag → pseudo-version. Dipakai
+// PERSIS (string literal) agar plan.Deps byte-identical (SPEC §5.2). Disuntikkan
+// resolver bila modul feature-strapgorm tak menyumbang gomod sendiri (mis. saat
+// real template belum hadir) sehingga dep tetap dideklarasikan deterministik.
+const (
+	strapgormModulePath = "github.com/faisalcayunda/strapgorm"
+	strapgormVersion    = "v0.0.0-20260610233751-7c87a8f27fb1"
+)
+
+// goVersionStrapgorm adalah go directive saat add-on strapgorm aktif: strapgorm
+// mensyaratkan Go ≥ 1.25, jadi project dinaikkan ke 1.25 (BUKAN 1.24 default
+// monolith) agar go.mod, Dockerfile (FROM golang:{{ .GoVersion }}), & README
+// konsisten. Sumber tunggal dipakai goVersionFor (lihat di bawah).
+const goVersionStrapgorm = "1.25"
 
 // Resolver mengubah Answers menjadi GeneratePlan. Implementasi:
 //   - meresolusi default (SPEC §6.2),
@@ -202,12 +274,21 @@ func (r *resolver) Resolve(a answers.Answers) (plan.GeneratePlan, error) {
 	}, nil
 }
 
-// goVersionFor memilih go directive sesuai arsitektur: microservice → 1.25
-// (google.golang.org/grpc v1.81.1 mensyaratkan go ≥ 1.25.0), arch lain → 1.24.
-// Sumber tunggal agar plan.GoVersion & data["GoVersion"] tak pernah divergen.
+// goVersionFor memilih go directive sesuai arsitektur/add-on: microservice → 1.25
+// (google.golang.org/grpc v1.81.1 mensyaratkan go ≥ 1.25.0); add-on strapgorm →
+// 1.25 (strapgorm mensyaratkan Go ≥ 1.25); selain itu → 1.24. Sumber tunggal agar
+// plan.GoVersion & data["GoVersion"] tak pernah divergen (byte-identical, §5.2).
+//
+// Catatan presedensi: strapgorm kini valid di KETIGA arch. Untuk microservice+
+// strapgorm, cabang microservice menang (dicek lebih dulu) — TAPI keduanya
+// menghasilkan 1.25, jadi urutan cek netral. Modular+strapgorm jatuh ke cabang
+// a.Strapgorm → 1.25. Semua jalur strapgorm = 1.25 (strapgorm butuh Go ≥ 1.25).
 func goVersionFor(a answers.Answers) string {
 	if a.Arch == answers.ArchMicroservice {
 		return goVersionMicroservice
+	}
+	if a.Strapgorm {
+		return goVersionStrapgorm
 	}
 	return goVersionDefault
 }
@@ -299,6 +380,17 @@ func checkConstraints(a answers.Answers) error {
 	if a.Obs && a.Kind == answers.KindWorker {
 		return fmt.Errorf("%w: --obs membutuhkan permukaan HTTP/server (C18); kind 'worker' tidak punya server", ErrConstraint)
 	}
+	// C-strapgorm: add-on strapgorm memakai akses query GORM, jadi prasyarat keras
+	// LINTAS-ARSITEKTUR = access=gorm ∧ db∈{postgres,mysql}. Ketiga arch didukung
+	// (monolith REUSE *gorm.DB access=gorm; modular inject ke domain modular;
+	// microservice = service product mandiri dgn DB sendiri). Lapis kedua fail-fast
+	// (answers.Validate sudah menolak ramah di entry point; di sini dipertahankan
+	// sebagai ErrConstraint agar konsisten dgn C-rules lain & menutup jalur yang
+	// melewati Validate). Hard-invalid → ErrConstraint.
+	if a.Strapgorm && (a.Access != answers.AccessGORM ||
+		(a.DB != answers.DBPostgres && a.DB != answers.DBMySQL)) {
+		return fmt.Errorf("%w: strapgorm butuh --access gorm + --db postgres|mysql (arch monolith|modular-monolith|microservice)", ErrConstraint)
+	}
 	return nil
 }
 
@@ -366,6 +458,30 @@ func (r *resolver) activeModules(a answers.Answers) ([]module.Manifest, error) {
 		}
 	}
 
+	// Add-on strapgorm: aktif bila Answers.Strapgorm ∧ prasyarat keras terpenuhi
+	// (access=gorm ∧ db∈{postgres,mysql} ∧ arch=monolith — sudah dijamin
+	// answers.Validate + checkConstraints sebelum titik ini). Modul me-REUSE
+	// koneksi *gorm.DB milik access-gorm-<driver> (yang sudah ikut aktif di blok
+	// di atas) → tepat satu pool DB; feature-strapgorm hanya menyumbang domain
+	// Product + wiring route /api/products (requires arch-monolith + access-gorm-*
+	// ditegakkan checkRelations dari manifest). Cek defensif prasyarat di sini agar
+	// modul TAK PERNAH aktif tanpa access-gorm-* di himpunan (mencegah requires
+	// gagal yang membingungkan).
+	if a.Strapgorm && a.Access == answers.AccessGORM &&
+		(a.DB == answers.DBPostgres || a.DB == answers.DBMySQL) {
+		switch a.Arch {
+		case answers.ArchModularMonolith:
+			// Modular: Product = domain modular kelas-satu (facade + internal/core),
+			// di-inject *gorm.DB access=gorm lewat composition root + anchor
+			// region:modules. requires arch-modular (sudah aktif di blok arch).
+			names = append(names, modFeatureStrapgormModular)
+		default:
+			// monolith (default applyDefaults). microservice TIDAK lewat sini —
+			// ia punya jalur activeMicroserviceModules sendiri.
+			names = append(names, modFeatureStrapgorm)
+		}
+	}
+
 	// Add-on per Answers.
 	if a.Docker {
 		names = append(names, modAddonDocker)
@@ -418,6 +534,20 @@ func (r *resolver) activeMicroserviceModules(a answers.Answers) ([]module.Manife
 	if a.CI == answers.CIGitHubActions || a.CI == answers.CIGitLabCI {
 		names = append(names, modAddonCI)
 	}
+	// Add-on strapgorm (microservice): service product MANDIRI (gRPC Ping + HTTP
+	// /api/products via strapgorm) dgn DB sendiri. Modul shared meng-emit kode
+	// product; modul driver-spesifik (-postgres/-mysql) menyumbang gomod driver +
+	// compose DB. Prasyarat (access=gorm ∧ db∈{postgres,mysql}) sudah dijamin
+	// answers.Validate + checkConstraints sebelum titik ini; cek defensif di sini
+	// agar modul TAK PERNAH aktif tanpa pasangan driver yang benar.
+	if a.Strapgorm && a.Access == answers.AccessGORM {
+		switch a.DB {
+		case answers.DBPostgres:
+			names = append(names, modFeatureStrapgormMicro, modFeatureStrapgormMicroPostgres)
+		case answers.DBMySQL:
+			names = append(names, modFeatureStrapgormMicro, modFeatureStrapgormMicroMySQL)
+		}
+	}
 	return r.resolveManifests(names)
 }
 
@@ -467,9 +597,7 @@ func checkRelations(active []module.Manifest) error {
 func buildData(a answers.Answers, active []module.Manifest, goVer string) map[string]any {
 	data := make(map[string]any)
 	for _, m := range active {
-		for k, v := range m.Vars {
-			data[k] = v
-		}
+		maps.Copy(data, m.Vars)
 	}
 	// Proyeksi field Answers yang lazim dipakai template (subset MVP).
 	//
@@ -493,6 +621,10 @@ func buildData(a answers.Answers, active []module.Manifest, goVer string) map[st
 	data["Makefile"] = a.Makefile
 	data["Lint"] = a.Lint
 	data["EnvExample"] = a.EnvExample
+	// Strapgorm diproyeksikan agar template feature-strapgorm & wiring main
+	// (region:imports/region:wiring/region:routes) dapat membaca {{ .Strapgorm }} /
+	// {{ if .Strapgorm }} untuk menggate kontribusi domain Product.
+	data["Strapgorm"] = a.Strapgorm
 	// Obs (observability) diproyeksikan agar template addon-observability &
 	// wiring server (chi/echo/net-http) dapat membaca {{ .Obs }} / {{ if .Obs }}.
 	data["Obs"] = a.Obs
@@ -816,10 +948,8 @@ func checkSafeTargetPath(target string) error {
 	if strings.HasPrefix(t, "/") {
 		return fmt.Errorf("target %q absolut (harus relatif terhadap project)", target)
 	}
-	for _, seg := range strings.Split(t, "/") {
-		if seg == ".." {
-			return fmt.Errorf("target %q mengandung '..' (path traversal)", target)
-		}
+	if slices.Contains(strings.Split(t, "/"), "..") {
+		return fmt.Errorf("target %q mengandung '..' (path traversal)", target)
 	}
 	return nil
 }
@@ -976,12 +1106,8 @@ func expandServiceFile(m module.Manifest, f module.FileSpec, a answers.Answers, 
 		// Gabung data global + override untuk evaluasi placeholder target
 		// (target butuh .Service DAN mungkin .ModulePath/modBase). Override menang.
 		merged := make(map[string]any, len(data)+len(override))
-		for k, v := range data {
-			merged[k] = v
-		}
-		for k, v := range override {
-			merged[k] = v
-		}
+		maps.Copy(merged, data)
+		maps.Copy(merged, override)
 		target, terr := renderTargetPath(f.Target, merged)
 		if terr != nil {
 			return nil, fmt.Errorf("modul %q file %q (service %q): %w", m.Name, f.Target, svc, terr)

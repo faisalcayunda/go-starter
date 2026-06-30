@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+// Paket proto service product: productv1. Netral-bahasa; opsi go_package di-manage
+// buf (buf.gen.yaml managed mode, prefix <module>/gen/go) sehingga file .proto
+// tetap bersih tanpa go_package literal. buf men-generate gen/go/product/v1/**.
+package productv1;
+
+// ProductService adalah kontrak gRPC service "product". rpc Ping membuktikan
+// service hidup & dapat dipanggil lintas-service (konsistensi mesh + health).
+// API query data (filter/sort/pagination Strapi) diekspos lewat HTTP /api/products,
+// bukan gRPC — strapgorm bersifat HTTP-query-native.
+service ProductService {
+  // Ping mengembalikan pesan "pong dari service product: <name>".
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+// PingRequest membawa nama pemanggil (echo-back pada response).
+message PingRequest {
+  string name = 1;
+}
+
+// PingResponse membawa pesan balasan service.
+message PingResponse {
+  string message = 1;
+}

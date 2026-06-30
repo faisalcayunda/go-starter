@@ -1,0 +1,7 @@
+	// region:wiring (feature-strapgorm) — REUSE koneksi GORM access=gorm (var db di atas);
+	// catat ke paket product lalu migrasi tabel products. Tanpa pool koneksi kedua.
+	product.SetDB(db)
+	if err := product.AutoMigrate(); err != nil {
+		logger.Error("auto-migrate products (strapgorm)", "error", err)
+		os.Exit(1)
+	}

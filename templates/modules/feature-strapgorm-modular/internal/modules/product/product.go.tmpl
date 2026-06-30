@@ -1,0 +1,55 @@
+// Package product adalah FACADE (permukaan publik) domain Product pada modular
+// monolith — add-on strapgorm (Strapi-style query builder di atas GORM). Inilah
+// satu-satunya paket product yang boleh disentuh composition root (cmd). Seluruh
+// detail implementasi (model, repository, handler) terkurung di sub-paket privat
+// internal/core — yang menurut semantik direktori internal/ Go HANYA bisa
+// di-import dari bawah internal/modules/product/. Domain lain TIDAK dapat menyentuh
+// isi product: boundary "berduri" dipaksa toolchain, bukan sekadar disepakati.
+//
+// Berbeda dari catalog/orders (storage in-memory), product memakai *gorm.DB yang
+// di-INJECT composition root — koneksi yang SAMA dengan access=gorm (REUSE, tanpa
+// pool kedua). Untuk produksi, ganti model/skema di internal/core sesuai domain.
+package product
+
+import (
+	"net/http"
+
+	"gorm.io/gorm"
+
+	"{{ modJoin .ModulePath "internal/modules/product/internal/core" }}"
+)
+
+// Module adalah unit domain Product yang sudah dirakit: ia menyimpan koneksi GORM
+// bersama (untuk migrasi) dan handler HTTP-nya. Composition root cukup memanggil
+// New(db) lalu meneruskan Module ke httpserver.New sebagai salah satu domain
+// (interface httpserver.Module dipenuhi lewat RegisterRoutes).
+type Module struct {
+	db      *gorm.DB
+	handler *core.Handler
+}
+
+// New merakit domain Product di atas koneksi GORM yang di-inject (REUSE access=gorm).
+// Repository + handler dirakit sekali; AutoMigrate dipanggil terpisah oleh
+// composition root agar pemanggil memutuskan fatal/lanjut atas kegagalan migrasi.
+func New(db *gorm.DB) *Module {
+	repo := core.NewGormRepository(db)
+	return &Module{
+		db:      db,
+		handler: core.NewHandler(repo),
+	}
+}
+
+// AutoMigrate menerapkan skema Product ke database memakai koneksi bersama.
+// Dipanggil composition root setelah New. Mengembalikan error agar pemanggil
+// memutuskan fatal/lanjut.
+func (m *Module) AutoMigrate() error {
+	return m.db.AutoMigrate(&core.Product{})
+}
+
+// RegisterRoutes memasang rute HTTP domain Product (GET /api/products) pada mux
+// netral-domain composition root. Tanda tangan ini memenuhi interface
+// httpserver.Module sehingga server modular (net/http, chi, echo) memasang domain
+// ini seragam — handler bertanda-tangan http.HandlerFunc murni net/http.
+func (m *Module) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/products", m.handler.ListProducts)
+}

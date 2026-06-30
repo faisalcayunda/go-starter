@@ -1,0 +1,105 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul feature-strapgorm-microservice: varian add-on strapgorm untuk
+# arch=microservice. AKTIF hanya bila Answers.Strapgorm ∧ access=gorm ∧
+# db∈{postgres,mysql} ∧ arch=microservice (ditegakkan answers.Validate + resolver
+# checkConstraints + resolver.activeMicroserviceModules).
+#
+# DESAIN MICROSERVICE (beda dari monolith/modular): strapgorm = query builder HTTP
+# (parse ?filters[..]= → SQL), sedangkan mesh ini murni gRPC. Maka Product menjadi
+# SERVICE MANDIRI di services/product/ yang menjalankan DUA permukaan:
+#   - gRPC Ping (konsisten dgn service lain + health.v1) untuk kesehatan mesh;
+#   - HTTP GET /api/products via strapgorm pada koneksi GORM SENDIRI (per-service
+#     DB — tiap service punya datanya sendiri, idiomatik microservice; BUKAN reuse
+#     pool seperti monolith).
+# Product TIDAK masuk Answers.Services: ia bukan node ping mesh biasa, jadi gateway
+# service pertama tak menargetkannya. Modul ini meng-emit SELURUH kode product +
+# proto-nya; buf men-generate gen/go/product/v1 saat builder create (hook buf-generate
+# arch-microservice). Import driver GORM di store.go di-branch per .DB; gomod driver
+# + compose DB disumbang modul feature-strapgorm-microservice-<driver> (go.mod jujur).
+#
+# ZERO LOCK-IN: hasil generate hanya meng-import libs/ & gen/ MILIK PROJECT + grpc/
+# protobuf/gorm/strapgorm (library publik). Tak ada import builder.
+name: feature-strapgorm-microservice
+description: >-
+  Service product mandiri untuk microservice (strapgorm: Strapi-style query builder
+  di atas GORM): gRPC Ping + HTTP GET /api/products (filter/sort/pagination/fields/
+  search aman) dengan koneksi GORM per-service. proto/product + services/product/**
+  ter-emit; buf men-generate gen/go/product/v1; service + DB ter-AUTO-WIRE ke
+  docker-compose. Driver GORM (gomod + compose DB) dari modul -<driver> pasangannya.
+
+# files[] skema FileSpec kanonik {template, target, mode, when}. Semua .go & .proto
+# dirender (mengandung {{ modJoin }} / {{ .DB }} → wajib render + gofmt). Tanpa
+# `when`: modul hanya aktif saat resolver memilihnya (strapgorm + gorm + sql + micro).
+files:
+  # Kontrak proto product (package productv1, rpc Ping). buf men-generate
+  # gen/go/product/v1 saat builder create (hook buf-generate).
+  - template: proto/product.proto.tmpl
+    target:   proto/product/v1/product.proto
+    mode:     render
+
+  # Entrypoint service product: gRPC server (Ping + health) + HTTP server (strapgorm).
+  - template: services/product/cmd/main.go.tmpl
+    target:   services/product/cmd/main.go
+    mode:     render
+
+  # Konfigurasi service product (env: gRPC/HTTP addr + DSN GORM, default per .DB).
+  - template: services/product/internal/config/config.go.tmpl
+    target:   services/product/internal/config/config.go
+    mode:     render
+
+  # Implementasi gRPC ProductServiceServer (Ping) — konsistensi mesh + health probe.
+  - template: services/product/internal/server/server.go.tmpl
+    target:   services/product/internal/server/server.go
+    mode:     render
+
+  # Lapisan store product (GORM + strapgorm). store.go memuat koneksi GORM dgn
+  # IMPORT DRIVER di-branch per .DB (postgres|mysql) — dep driver dari modul -<driver>.
+  - template: services/product/internal/store/store.go.tmpl
+    target:   services/product/internal/store/store.go
+    mode:     render
+  - template: services/product/internal/store/model.go.tmpl
+    target:   services/product/internal/store/model.go
+    mode:     render
+  - template: services/product/internal/store/repository.go.tmpl
+    target:   services/product/internal/store/repository.go
+    mode:     render
+  - template: services/product/internal/store/handler.go.tmpl
+    target:   services/product/internal/store/handler.go
+    mode:     render
+
+# Dependency go.mod via gomod: (modfile.Format, ADR-002 §6). gorm core + strapgorm
+# (grpc + protobuf SUDAH dari arch-microservice). Driver GORM (postgres|mysql) BUKAN
+# di sini — disumbang modul feature-strapgorm-microservice-<driver> agar go.mod
+# jujur (hanya driver terpilih). Versi DIPIN (byte-identical, SPEC §5.2).
+gomod:
+  - path:    gorm.io/gorm
+    version: v1.31.1
+  - path:    github.com/faisalcayunda/strapgorm
+    version: v0.0.0-20260610233751-7c87a8f27fb1
+
+# Membutuhkan arch-microservice (pemilik docker-compose.yml ber-anchor region:services/
+# volumes + libs/ + buf + Dockerfile multi-service + go.mod root + hook buf-generate).
+requires:
+  - arch-microservice
+
+# Tidak ada konflik modul: aditif di atas arch-microservice + modul driver.
+conflicts: []
+
+# Kontribusi merge (AUTO-WIRE) ke docker-compose.yml root milik arch-microservice:
+#   - region:services → blok compose service "product" (build SERVICE=product, port
+#     HTTP, depends_on DB). Order 100 sengaja jauh di atas service mesh (order
+#     10+idx) agar product SELALU tersusun setelah seluruh service mesh berapa pun
+#     jumlahnya (deterministik; tie-break nama modul tetap stabil). DB driver = 110.
+# Volume + service DB disumbang modul feature-strapgorm-microservice-<driver>.
+contributes:
+  - target:   docker-compose.yml
+    anchor:   services
+    fragment: fragments/compose.product.service.yml.tmpl
+    order:    100
+
+# Vars default modul: port service product (gRPC + HTTP). Dipakai config.go &
+# compose. GoVersion efektif (1.25) disetel resolver.goVersionFor (microservice
+# sudah 1.25; strapgorm juga 1.25).
+vars:
+  ProductGrpcPort: 50060
+  ProductHTTPPort: 8082

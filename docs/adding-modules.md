@@ -28,6 +28,33 @@ mengevaluasi `when` per file/fragmen (lapis kedua), menghasilkan `GeneratePlan`
 deterministik yang dirender generator. Output selalu **zero lock-in**: tidak ada
 import ke builder.
 
+> **Contoh modul fitur yang bergantung pada satu pilihan akses (3 varian per-arch):**
+> Add-on `strapgorm` aktif bila diminta DAN prasyarat keras terpenuhi:
+> `access=gorm` ∧ `db ∈ {postgres, mysql}` (ditegakkan `answers.Validate`, dicermin
+> resolver `checkConstraints` sebagai C-strapgorm). Bentuknya BEDA per arsitektur,
+> diwujudkan sebagai modul fitur terpisah yang dipilih resolver per `arch`:
+>
+> - **`feature-strapgorm`** (`arch=monolith`) — domain `internal/product/**`, **REUSE**
+>   `*gorm.DB` milik `access-gorm-<driver>` via package-global `product.SetDB(db)`
+>   (fragmen wiring `order: 30` > `25` access-gorm — tanpa pool kedua); menyumbang
+>   fragmen ke `region:imports`/`region:wiring` (`main.go`) + `region:imports`/`region:routes`
+>   (`internal/httpserver/server.go`, FRAMEWORK-AWARE per `.HTTP`) untuk `GET /api/products`.
+> - **`feature-strapgorm-modular`** (`arch=modular-monolith`) — Product jadi domain modular
+>   kelas-satu `internal/modules/product/**` (facade + `internal/core` berduri), di-**inject**
+>   `*gorm.DB` access=gorm lewat composition root (`product.New(db)`), didaftarkan ke
+>   `httpserver.New(...)` via anchor `region:modules` (fragmen `main.go`). Pendaftaran rute
+>   SERAGAM lintas HTTP framework (interface `httpserver.Module { RegisterRoutes(*http.ServeMux) }`).
+> - **`feature-strapgorm-microservice`** (+ `-postgres`/`-mysql`) (`arch=microservice`) — service
+>   `product` MANDIRI (gRPC Ping + HTTP `/api/products`) dgn koneksi GORM **per-service** (BUKAN
+>   reuse); modul shared meng-emit kode + proto + fragmen compose service, modul `-<driver>`
+>   menyumbang gomod driver + service DB compose (TANPA file `.go` → go.mod jujur, hanya driver
+>   terpilih). Driver di-import `store.go` lewat branch `{{ if eq .DB "mysql" }}`.
+>
+> Modul-modul ini sengaja **tidak** mendeklarasikan `requires: access-gorm-<driver>` (kedua
+> driver saling-konflik) — prasyarat di-gate sebelum resolver, dan resolver hanya
+> mengaktifkannya pada kombinasi yang membawa driver yang benar. Lihat manifestnya sebagai
+> pola modul fitur add-on yang murni aditif di atas pilihan akses + arsitektur tertentu.
+
 ---
 
 ## 2. Anatomi sebuah modul

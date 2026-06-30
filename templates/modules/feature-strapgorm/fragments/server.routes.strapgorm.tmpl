@@ -1,0 +1,16 @@
+{{- if eq .HTTP "net/http" }}
+	// region:routes (feature-strapgorm) — daftarkan GET /api/products (Strapi-style
+	// query builder di atas koneksi GORM bersama yang disetel di wiring main). mux
+	// (*http.ServeMux) ada di scope httpserver.New profil net/http.
+	product.Mount(mux)
+{{- else if eq .HTTP "chi" }}
+	// region:routes (feature-strapgorm) — daftarkan GET /api/products (Strapi-style
+	// query builder di atas koneksi GORM bersama yang disetel di wiring main).
+	// ListHandler() http.HandlerFunc dipasang idiomatik chi pada router r.
+	r.Get("/api/products", product.ListHandler())
+{{- else if eq .HTTP "echo" }}
+	// region:routes (feature-strapgorm) — daftarkan GET /api/products (Strapi-style
+	// query builder di atas koneksi GORM bersama yang disetel di wiring main).
+	// ListHandler() net/http dibungkus echo.WrapHandler lalu dipasang pada router e.
+	e.GET("/api/products", echo.WrapHandler(product.ListHandler()))
+{{- end }}

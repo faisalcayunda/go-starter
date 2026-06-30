@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+// Paket proto per service: <service>v1. Netral-bahasa; opsi go_package di-manage
+// oleh buf (buf.gen.yaml managed mode, prefix <module>/gen/go) sehingga file .proto
+// tetap bersih tanpa go_package literal.
+package svc_av1;
+
+// SvcAService adalah kontrak minimal service "svc-a".
+// rpc Ping membuktikan service hidup & dapat dipanggil lintas-service via gRPC.
+service SvcAService {
+  // Ping mengembalikan pesan "pong dari service svc-a: <name>" — dipakai contoh inter-service call.
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+// PingRequest membawa nama pemanggil (echo-back pada response).
+message PingRequest {
+  string name = 1;
+}
+
+// PingResponse membawa pesan balasan service.
+message PingResponse {
+  string message = 1;
+}

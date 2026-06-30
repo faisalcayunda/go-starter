@@ -1,0 +1,12 @@
+  # database PostgreSQL untuk service product (strapgorm, koneksi GORM per-service).
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: app
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-app}
+    ports:
+      - "5432:5432"
+    volumes:
+      - product-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped

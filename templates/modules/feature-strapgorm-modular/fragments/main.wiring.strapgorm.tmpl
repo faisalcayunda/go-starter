@@ -1,0 +1,8 @@
+	// region:wiring (feature-strapgorm-modular) — rakit domain Product di atas koneksi GORM
+	// access=gorm (var db dari fragmen access-gorm di atas, REUSE tanpa pool kedua) lalu
+	// migrasi tabel products. productMod disisipkan ke httpserver.New via region:modules.
+	productMod := product.New(db)
+	if err := productMod.AutoMigrate(); err != nil {
+		logger.Error("auto-migrate products (strapgorm)", "error", err)
+		os.Exit(1)
+	}

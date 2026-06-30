@@ -331,18 +331,20 @@ func validateCatalog(fsys fs.FS, loaded map[string]Manifest) error {
 		module   string
 		template string // path .tmpl relatif dir modul pemilik
 	}
-	targetSkeleton := make(map[string]skelRef)
+	// targetSkeleton memetakan target → SEMUA skeleton owner-nya. Satu target bisa
+	// dimiliki >1 modul yang SALING-EKSKLUSIF per arch (mis. cmd/<app>/main.go:
+	// core untuk monolith, arch-modular untuk modular) — resolver memastikan tepat
+	// satu aktif. Untuk verifikasi anchor (M-4) CUKUP salah satu owner memuat anchor
+	// (anchor spesifik-arch seperti region:modules hanya ada di skeleton arch-modular;
+	// kontribusi yang menargetkannya pun requires arch-modular sehingga owner aktif
+	// pasti yang memuatnya). Mengumpulkan SEMUA owner menghindari false-negative dari
+	// urutan map yang non-deterministik.
+	targetSkeleton := make(map[string][]skelRef)
 	for _, m := range loaded {
 		for _, f := range m.Files {
 			ownedTargets[f.Target] = struct{}{}
 			if f.Mode != "mkdir" {
-				// Pemilik pertama (deterministik: iterasi loaded tak terurut, tetapi
-				// satu target hanya boleh dimiliki satu skeleton — bila ganda, owner
-				// ditentukan resolver; untuk verifikasi anchor cukup salah satu yang
-				// memuat anchor). Simpan bila belum ada.
-				if _, exists := targetSkeleton[f.Target]; !exists {
-					targetSkeleton[f.Target] = skelRef{module: m.Name, template: f.Template}
-				}
+				targetSkeleton[f.Target] = append(targetSkeleton[f.Target], skelRef{module: m.Name, template: f.Template})
 			}
 		}
 	}
@@ -399,8 +401,21 @@ func validateCatalog(fsys fs.FS, loaded map[string]Manifest) error {
 			// ini, typo pada contributes[].anchor lolos Load dan baru gagal saat
 			// Assemble (merge: anchor tidak ditemukan) — error tertunda jauh dari
 			// sumbernya. Fail-fast di Load.
-			if err := checkAnchorInSkeleton(fsys, targetSkeleton[c.Target].module, targetSkeleton[c.Target].template, c.Anchor); err != nil {
-				return fmt.Errorf("module %q: contributes[%d] (target %q) %v", name, i, c.Target, err)
+			owners := targetSkeleton[c.Target]
+			anchorFound := false
+			var lastErr error
+			for _, o := range owners {
+				if err := checkAnchorInSkeleton(fsys, o.module, o.template, c.Anchor); err == nil {
+					anchorFound = true
+					break
+				} else {
+					lastErr = err
+				}
+			}
+			// CUKUP satu owner memuat anchor (target multi-owner per arch). Bila TIADA
+			// owner punya anchor → typo/anchor hilang di semua skeleton → fail-fast.
+			if !anchorFound && lastErr != nil {
+				return fmt.Errorf("module %q: contributes[%d] (target %q) anchor %q tidak ada di skeleton owner mana pun: %v", name, i, c.Target, c.Anchor, lastErr)
 			}
 		}
 	}

@@ -285,3 +285,74 @@ func TestValidate_AccessMigrateOnlyWhenDB(t *testing.T) {
 		t.Errorf("db=none access/migrate kosong harus lolos Validate (C1/C2 = resolver), dapat: %v", err)
 	}
 }
+
+// validStrapgorm mengembalikan Answers monolith + gorm + postgres + add-on
+// strapgorm yang LOLOS Validate (prasyarat keras terpenuhi).
+func validStrapgorm() Answers {
+	a := validMonolith()
+	a.DB = DBPostgres
+	a.Access = AccessGORM
+	a.Strapgorm = true
+	return a
+}
+
+// TestValidate_Strapgorm memverifikasi prasyarat keras add-on strapgorm
+// (access=gorm + db∈{postgres,mysql} + arch=monolith) ditolak RAMAH di Validate
+// bila tak terpenuhi, dan kombinasi valid lolos. Pesan tolak menyebut ketiga
+// syarat (satu pesan tunggal) — selaras checkConstraints C-strapgorm di resolver.
+func TestValidate_Strapgorm(t *testing.T) {
+	t.Run("valid: gorm+postgres+monolith", func(t *testing.T) {
+		if err := validStrapgorm().Validate(); err != nil {
+			t.Errorf("strapgorm gorm+postgres+monolith harus valid, dapat: %v", err)
+		}
+	})
+	t.Run("valid: gorm+mysql+monolith", func(t *testing.T) {
+		a := validStrapgorm()
+		a.DB = DBMySQL
+		if err := a.Validate(); err != nil {
+			t.Errorf("strapgorm gorm+mysql+monolith harus valid, dapat: %v", err)
+		}
+	})
+	// Sejak strapgorm meluas ke 3 arch: modular-monolith & microservice = VALID
+	// (asal access=gorm + db∈{postgres,mysql}).
+	t.Run("valid: gorm+postgres+modular", func(t *testing.T) {
+		a := validStrapgorm()
+		a.Arch = ArchModularMonolith
+		if err := a.Validate(); err != nil {
+			t.Errorf("strapgorm gorm+postgres+modular harus valid, dapat: %v", err)
+		}
+	})
+	t.Run("valid: gorm+postgres+microservice", func(t *testing.T) {
+		a := validStrapgorm()
+		a.Arch = ArchMicroservice
+		a.Services = []Service{{Name: "svc-a"}}
+		if err := a.Validate(); err != nil {
+			t.Errorf("strapgorm gorm+postgres+microservice harus valid, dapat: %v", err)
+		}
+	})
+
+	reject := []struct {
+		name   string
+		mutate func(a *Answers)
+	}{
+		{"tanpa access gorm (sqlx)", func(a *Answers) { a.Access = AccessSQLx }},
+		{"tanpa access gorm (database/sql)", func(a *Answers) { a.Access = AccessDatabaseSQL }},
+		{"db none", func(a *Answers) { a.DB = DBNone; a.Access = "" }},
+	}
+	for _, tc := range reject {
+		t.Run("reject: "+tc.name, func(t *testing.T) {
+			a := validStrapgorm()
+			tc.mutate(&a)
+			err := a.Validate()
+			if err == nil {
+				t.Fatalf("strapgorm %s harus ditolak Validate, dapat nil", tc.name)
+			}
+			// Pesan tunggal menyebut ketiga prasyarat (ramah, dapat dibaca user).
+			for _, sub := range []string{"strapgorm", "gorm", "monolith"} {
+				if !strings.Contains(err.Error(), sub) {
+					t.Errorf("pesan tolak harus memuat %q, dapat: %v", sub, err)
+				}
+			}
+		})
+	}
+}

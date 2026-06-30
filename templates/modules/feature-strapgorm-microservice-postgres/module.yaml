@@ -1,0 +1,51 @@
+# Manifest modul template (skema kanonik ADR-002 §3.2 / ADR-003 D2).
+# Modul feature-strapgorm-microservice-postgres: pasangan driver PostgreSQL untuk
+# service product microservice (feature-strapgorm-microservice). AKTIF hanya bila
+# Answers.Strapgorm ∧ access=gorm ∧ db=postgres ∧ arch=microservice (dipilih
+# resolver.activeMicroserviceModules berdasar .DB).
+#
+# Modul MURNI gomod + compose (TANPA file .go): import driver
+# gorm.io/driver/postgres ada di store.go modul SHARED (di-branch {{ if eq .DB
+# "postgres" }}) — di sini cukup mendeklarasikan dependency-nya agar go.mod jujur
+# (hanya driver terpilih ter-require) + menyumbang service DB PostgreSQL & volume
+# ke docker-compose. Mengikuti pola access-gorm-<driver>.
+name: feature-strapgorm-microservice-postgres
+description: >-
+  Pasangan driver PostgreSQL untuk service product microservice: dependency
+  gorm.io/driver/postgres + service compose PostgreSQL (+ volume) untuk koneksi
+  GORM per-service product. Tanpa file .go (driver di-import store.go modul shared).
+
+# Tanpa file .go: modul ini hanya menyumbang gomod + fragmen compose (lihat
+# contributes). Service DB di-build dari image resmi, bukan kode project.
+files: []
+
+# Dependency go.mod: driver postgres GORM (BENAR-BENAR di-import store.go modul
+# shared saat db=postgres). gorm core + strapgorm SUDAH dari modul shared. Versi
+# terverifikasi (pkg.go.dev): driver/postgres v1.6.0. String DIPIN (byte-identical).
+gomod:
+  - path:    gorm.io/driver/postgres
+    version: v1.6.0
+
+# Membutuhkan modul shared (pemilik kode product + import driver branched). Modul
+# shared sendiri requires arch-microservice (pemilik docker-compose ber-anchor).
+requires:
+  - feature-strapgorm-microservice
+
+# Tepat satu driver aktif: konflik dengan pasangan MySQL.
+conflicts:
+  - feature-strapgorm-microservice-mysql
+
+# Kontribusi merge ke docker-compose.yml root (milik arch-microservice):
+#   - region:services → service PostgreSQL (order 110 > 100 product, > service mesh);
+#   - region:volumes  → volume data persisten.
+contributes:
+  - target:   docker-compose.yml
+    anchor:   services
+    fragment: fragments/compose.db.service.yml.tmpl
+    order:    110
+  - target:   docker-compose.yml
+    anchor:   volumes
+    fragment: fragments/compose.db.volume.yml.tmpl
+    order:    10
+
+vars: {}
